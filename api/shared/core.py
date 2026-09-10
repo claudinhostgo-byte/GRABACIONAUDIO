@@ -67,15 +67,31 @@ _svc_cache = {}
 
 def _svc():
     """BlobServiceClient reutilizado entre invocaciones del mismo proceso."""
-    cs = os.environ.get("AUDIO_STORAGE_CONNECTION")
+    cs = os.environ.get("AUDIO_STORAGE_CONNECTION", "")
+    # tolera comillas y espacios pegados al copiar el valor desde el portal
+    cs = cs.strip().strip('"').strip("'").strip()
     if not cs:
         raise ConfigError("Falta AUDIO_STORAGE_CONNECTION.")
-    if _svc_cache.get("cs") != cs:
-        _svc_cache.clear()
-        _svc_cache["cs"] = cs
-        _svc_cache["svc"] = BlobServiceClient.from_connection_string(cs)
-        _svc_cache["container_ready"] = False
-    return _svc_cache["svc"]
+
+    if _svc_cache.get("cs") == cs and "svc" in _svc_cache:
+        return _svc_cache["svc"]
+
+    # el cliente se construye ANTES de poblar la cache: si esto falla, la cache
+    # no queda a medias enmascarando el error real en las llamadas siguientes
+    try:
+        svc = BlobServiceClient.from_connection_string(cs)
+    except Exception as e:
+        raise ConfigError(
+            "AUDIO_STORAGE_CONNECTION no es una cadena de conexion valida (%s: %s). "
+            "Debe empezar con DefaultEndpointsProtocol= e incluir AccountName y AccountKey."
+            % (type(e).__name__, e)
+        )
+
+    _svc_cache.clear()
+    _svc_cache["cs"] = cs
+    _svc_cache["svc"] = svc
+    _svc_cache["container_ready"] = False
+    return svc
 
 
 def _ensure_container(svc):
@@ -161,11 +177,14 @@ def transcribe_blob(blob_name, locales=None, diarize=0):
     except (TypeError, ValueError):
         diarize = 0
 
+    # _svc() fuera del try: un problema de configuracion no debe disfrazarse
+    # de "blob no encontrado"
+    svc = _svc()
     try:
-        audio = _svc().get_blob_client(container_name(), blob_name) \
-                      .download_blob().readall()
+        audio = svc.get_blob_client(container_name(), blob_name).download_blob().readall()
     except Exception as e:
-        raise UserError("No se pudo leer el blob '%s': %s" % (blob_name, e))
+        raise UserError("No se pudo leer el blob '%s': %s: %s"
+                        % (blob_name, type(e).__name__, e))
 
     definition = {"locales": locales, "profanityFilterMode": "None"}
     if diarize > 1:
@@ -225,4 +244,6 @@ def error_response(exc):
                 body["detail"] = exc.detail
             return status, body
     logging.exception("Error no previsto")
-    return 500, {"error": "Error interno: %s" % exc}
+    # se incluye el tipo: un str(exc) suelto puede ser ilegible (p. ej. un
+    # KeyError se serializa solo como el nombre de la clave)
+    return 500, {"error": "Error interno: %s: %s" % (type(exc).__name__, exc)}
