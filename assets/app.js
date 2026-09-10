@@ -22,6 +22,7 @@ const CFG_NUBE = {
   trMode: 'function',
   trUrl: '/api/transcribe',
   trMockUrl: '',
+  recUrl: '/api/records',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -35,6 +36,7 @@ const CFG_LOCAL = {
   trMode: 'mock',
   trUrl: 'http://localhost:8000/api/transcribe',
   trMockUrl: 'http://localhost:5501/transcribe',
+  recUrl: 'http://localhost:5501/records',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -192,6 +194,7 @@ function saveCfg(){
     trMode:    $('cfgTrMode').value,
     trUrl:     $('cfgTrUrl').value.trim(),
     trMockUrl: $('cfgTrMockUrl').value.trim(),
+    recUrl:    S.cfg.recUrl,
     locale:    $('cfgLocale').value,
     diarize:   $('cfgDiarize').value
   };
@@ -201,6 +204,9 @@ function saveCfg(){
 }
 const cfgReady = () => S.cfg.mode === 'sas' ? !!S.cfg.sasUrl : !!S.cfg.fnUrl;
 const trEndpoint = () => S.cfg.trMode === 'mock' ? S.cfg.trMockUrl : S.cfg.trUrl;
+/** Endpoint de consulta de grabaciones existentes; sigue al modo elegido. */
+const recEndpoint = () => S.cfg.recUrl ||
+  (S.cfg.trMode === 'mock' ? 'http://localhost:5501/records' : '/api/records');
 
 /* ---------- Paso 1: ID ---------- */
 function confirmId(){
@@ -217,9 +223,10 @@ function confirmId(){
   $('btnIdEdit').classList.remove('hidden');
   $('s1state').textContent = 'ID: ' + clean;
   $('s1state').className = 'pill ok';
-  $('step2').classList.remove('disabled');
-  $('s2state').textContent = 'Listo';
   refreshUploadBtn();
+  // el paso 2 se habilita solo si no hay una grabación previa para este ID
+  bloquearGrabacion();
+  buscarExistentes();
 }
 function editId(){
   if (S.rec && S.rec.state !== 'inactive') return;
@@ -229,6 +236,217 @@ function editId(){
   $('btnIdEdit').classList.add('hidden');
   $('s1state').textContent = 'Pendiente'; $('s1state').className = 'pill';
   $('recId').focus();
+}
+
+
+/* ---------- Grabaciones ya registradas para el ID ---------- */
+
+function bloquearGrabacion(){
+  $('step2').classList.add('disabled');
+  $('s2state').textContent = 'Bloqueado'; $('s2state').className = 'pill';
+}
+function desbloquearGrabacion(){
+  $('step2').classList.remove('disabled');
+  $('s2state').textContent = 'Listo'; $('s2state').className = 'pill';
+}
+
+/**
+ * Al cargar un ID se consulta si ya existe audio para ese registro.
+ * Si existe se muestra con su transcripción y NO se habilita grabar; si no
+ * existe, se habilita. Si la consulta falla se habilita igual: dejar la
+ * herramienta inservible por un error transitorio es peor que grabar de más.
+ */
+async function buscarExistentes(){
+  const url = recEndpoint();
+  $('existentes').classList.add('hidden');
+  $('exList').innerHTML = '';
+
+  if (!url){ setMsg($('buscaMsg'), ''); desbloquearGrabacion(); return; }
+
+  $('s2state').textContent = 'Verificando';
+  $('buscaMsg').innerHTML = '<span class="spin"></span>Buscando grabaciones registradas para este ID…';
+  $('buscaMsg').className = 'msg';
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordId: S.id })
+    });
+    const txt = await res.text();
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e){ throw new Error('respuesta no JSON: ' + txt.slice(0, 150)); }
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+
+    if (d.count > 0){
+      renderExistentes(d);
+      return;
+    }
+    setMsg($('buscaMsg'), 'Sin grabaciones previas para este ID: puede grabar.', 'ok');
+    desbloquearGrabacion();
+  } catch (e){
+    setMsg($('buscaMsg'), 'No se pudo verificar si ya existe una grabación (' + e.message +
+      '). Se habilita la grabación de todas formas.', 'bad');
+    desbloquearGrabacion();
+  }
+}
+
+function renderExistentes(d){
+  const cont = $('exList');
+  cont.innerHTML = '';
+  d.items.forEach((it) => cont.appendChild(tarjetaExistente(it)));
+
+  $('existentes').classList.remove('hidden');
+  setMsg($('buscaMsg'),
+    d.count + (d.count === 1 ? ' grabación ya registrada' : ' grabaciones ya registradas') +
+    ' para este ID. Puede escucharla y transcribirla aquí.', 'ok');
+  $('s2state').textContent = 'Ya existe grabación'; $('s2state').className = 'pill';
+  $('step2').classList.add('disabled');
+}
+
+function tarjetaExistente(it){
+  const box = document.createElement('div');
+  box.className = 'exitem';
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  [
+    it.createdAt ? new Date(it.createdAt).toLocaleString('es-CL') : 'fecha n/d',
+    it.durationMs ? 'Duración: ' + fmtTime(it.durationMs) : null,
+    it.sizeBytes ? fmtSize(it.sizeBytes) : null,
+    it.blobName
+  ].filter(Boolean).forEach((t) => {
+    const sp = document.createElement('span'); sp.textContent = t; meta.appendChild(sp);
+  });
+  box.appendChild(meta);
+
+  if (it.audioUrl){
+    const au = document.createElement('audio');
+    au.controls = true; au.className = 'player'; au.src = it.audioUrl;
+    box.appendChild(au);
+  }
+
+  const zona = document.createElement('div');
+  zona.className = 'exTr';
+  box.appendChild(zona);
+  pintarTranscripcion(zona, it);
+  return box;
+}
+
+/** Contenido de transcripción de una grabación existente, o el botón para pedirla. */
+function pintarTranscripcion(zona, it){
+  zona.innerHTML = '';
+  const t = it.transcript;
+
+  const h = document.createElement('h3');
+  h.className = 'trh'; h.textContent = 'Transcripción';
+  zona.appendChild(h);
+
+  if (t && t.text){
+    if (t.mock){
+      const w = document.createElement('div');
+      w.className = 'banner mock';
+      w.textContent = 'Transcripción simulada: no proviene de Azure AI Speech.';
+      zona.appendChild(w);
+    }
+    const st = document.createElement('div');
+    st.className = 'trmeta';
+    const sp = document.createElement('span');
+    const nSeg = (t.phrases || []).length;
+    sp.textContent = [
+      String(t.text).split(/\s+/).filter(Boolean).length + ' palabras',
+      nSeg ? nSeg + ' segmentos' : null,
+      (t.locales && t.locales[0]) ? 'idioma ' + t.locales[0] : null
+    ].filter(Boolean).join(' · ');
+    st.appendChild(sp); zona.appendChild(st);
+
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'trfull';
+    cuerpo.textContent = t.text;
+    zona.appendChild(cuerpo);
+
+    const acciones = document.createElement('div');
+    acciones.className = 'ctrls';
+    const copiar = document.createElement('button');
+    copiar.type = 'button'; copiar.className = 'ghost small'; copiar.textContent = 'Copiar texto';
+    copiar.onclick = () => navigator.clipboard.writeText(t.text)
+      .then(() => { copiar.textContent = 'Copiado'; });
+    acciones.appendChild(copiar);
+
+    const enviar = document.createElement('button');
+    enviar.type = 'button'; enviar.className = 'ghost small';
+    enviar.textContent = 'Enviar al caso';
+    enviar.onclick = () => {
+      const ok = avisarAlPadre({ blobName: it.blobName, text: t.text,
+                                 locale: (t.locales && t.locales[0]) || S.cfg.locale,
+                                 phrases: t.phrases || [], mock: !!t.mock });
+      enviar.textContent = ok ? 'Enviado' : 'No hay contenedor';
+    };
+    if (EN_IFRAME && ORIGEN_PADRE) acciones.appendChild(enviar);
+
+    zona.appendChild(acciones);
+    return;
+  }
+
+  if (t && t.error){
+    const p = document.createElement('p');
+    p.className = 'msg bad'; p.textContent = t.error;
+    zona.appendChild(p);
+  }
+
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.textContent = 'Este audio está almacenado pero todavía no tiene transcripción.';
+  zona.appendChild(p);
+
+  const acciones = document.createElement('div');
+  acciones.className = 'ctrls';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'primary'; btn.textContent = 'Transcribir';
+  btn.onclick = () => transcribirExistente(it, zona, btn);
+  acciones.appendChild(btn);
+  zona.appendChild(acciones);
+
+  const est = document.createElement('div');
+  est.className = 'msg'; est.id = 'exmsg-' + it.blobName.replace(/[^A-Za-z0-9]/g, '');
+  zona.appendChild(est);
+}
+
+/** Transcribe una grabación ya almacenada, sin volver a grabarla. */
+async function transcribirExistente(it, zona, btn){
+  const url = trEndpoint();
+  const est = zona.querySelector('.msg');
+  btn.disabled = true;
+  if (est){
+    est.className = 'msg';
+    est.innerHTML = '<span class="spin"></span>Transcribiendo, puede tardar según la duración…';
+  }
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blobName: it.blobName, blobUrl: it.audioUrl,
+        locales: [S.cfg.locale], diarize: Number(S.cfg.diarize) || 0
+      })
+    });
+    const txt = await res.text();
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e){ throw new Error('respuesta no JSON: ' + txt.slice(0, 150)); }
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+    if (!d.text) throw new Error('Azure no devolvió texto. ¿El audio quedó en silencio?');
+
+    it.transcript = d;
+    pintarTranscripcion(zona, it);
+    avisarAlPadre({ blobName: it.blobName, text: d.text,
+                    locale: (d.locales && d.locales[0]) || S.cfg.locale,
+                    phrases: d.phrases || [], mock: !!d.mock });
+  } catch (e){
+    btn.disabled = false;
+    if (est) setMsg(est, 'Error al transcribir: ' + e.message, 'bad');
+  }
 }
 
 /* ---------- Paso 2: micrófonos ---------- */
@@ -866,6 +1084,10 @@ function init(){
   $('btnDl').onclick     = download;
   $('btnReset').onclick  = resetTake;
   $('histClear').onclick = () => { localStorage.removeItem(HIST_KEY); renderHist(); };
+  $('btnOtra').onclick   = () => {
+    desbloquearGrabacion();
+    setMsg($('buscaMsg'), 'Grabación habilitada manualmente: se agregará otra grabación a este ID.');
+  };
 
   $('btnTr').onclick     = transcribe;
   $('btnTrCopy').onclick = () => navigator.clipboard.writeText(S.tr.text)

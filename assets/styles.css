@@ -225,3 +225,11 @@ body.embed .card{border-radius:0;box-shadow:none;border-left:0;border-right:0;
   margin-bottom:0;border-top:0}
 body.embed .card + .card{border-top:1px solid var(--line)}
 body.embed .card:first-of-type{border-top:0}
+
+/* grabaciones ya registradas para el ID */
+.exitem{border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:10px}
+.exitem:last-child{margin-bottom:0}
+.exitem .meta{margin-bottom:8px}
+.exitem .player{margin-bottom:4px}
+.exitem .trh{margin-top:10px}
+.exitem .exTr .ctrls{margin-top:10px}

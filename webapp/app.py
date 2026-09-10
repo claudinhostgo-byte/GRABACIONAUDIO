@@ -89,6 +89,16 @@ def api_transcribe():
     return jsonify(result)
 
 
+@app.post("/api/records")
+def api_records():
+    body = request.get_json(silent=True) or {}
+    try:
+        datos = core.listar_grabaciones(body.get("recordId"))
+    except Exception as e:
+        return _fail(e)
+    return jsonify(datos)
+
+
 @app.get("/api/health")
 def health():
     """Dice si falta configuracion, sin revelar valores."""

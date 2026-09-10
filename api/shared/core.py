@@ -23,6 +23,7 @@ import requests
 from azure.storage.blob import (
     BlobSasPermissions,
     BlobServiceClient,
+    ContentSettings,
     generate_blob_sas,
 )
 
@@ -160,6 +161,90 @@ def make_upload_target(record_id, ext="wav"):
     }
 
 
+def _sas_lectura(svc, blob_name, minutos=60):
+    """SAS de solo lectura para reproducir un audio ya almacenado."""
+    key = getattr(svc.credential, "account_key", None)
+    if not key:
+        return None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    token = generate_blob_sas(
+        account_name=svc.account_name,
+        container_name=container_name(),
+        blob_name=blob_name,
+        account_key=key,
+        permission=BlobSasPermissions(read=True),
+        start=now - datetime.timedelta(minutes=5),
+        expiry=now + datetime.timedelta(minutes=minutos),
+    )
+    return "{}/{}/{}?{}".format(svc.url.rstrip("/"), container_name(), blob_name, token)
+
+
+def _nombre_transcripcion(blob_name):
+    """La transcripcion vive junto al audio, con el mismo nombre + .json."""
+    return blob_name + ".json"
+
+
+def guardar_transcripcion(blob_name, payload):
+    """Persiste la transcripcion para poder recuperarla al reabrir el registro."""
+    try:
+        svc = _svc()
+        cuerpo = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        svc.get_blob_client(container_name(), _nombre_transcripcion(blob_name)).upload_blob(
+            cuerpo, overwrite=True,
+            content_settings=ContentSettings(content_type="application/json; charset=utf-8"),
+        )
+        return True
+    except Exception as e:
+        # que falle el guardado no debe tumbar la transcripcion ya obtenida
+        logging.warning("No se pudo guardar la transcripcion de %s: %s", blob_name, e)
+        return False
+
+
+def listar_grabaciones(record_id, con_texto=True):
+    """Devuelve las grabaciones de un ID con su transcripcion, si existe."""
+    rid = sanitize_id(record_id)
+    prefijo = rid + "/"
+    svc = _svc()
+    cc = svc.get_container_client(container_name())
+
+    try:
+        blobs = list(cc.list_blobs(name_starts_with=prefijo, include=["metadata"]))
+    except Exception as e:
+        raise UpstreamError("No se pudo listar el contenedor: %s" % e)
+
+    transcripciones = set(b.name for b in blobs if b.name.endswith(".json"))
+    audios = [b for b in blobs if not b.name.endswith(".json")]
+    # mas recientes primero: el nombre empieza por fecha y hora
+    audios.sort(key=lambda b: b.name, reverse=True)
+
+    items = []
+    for b in audios:
+        meta = b.metadata or {}
+        item = {
+            "blobName": b.name,
+            "sizeBytes": b.size,
+            "createdAt": (meta.get("createdat")
+                          or (b.creation_time.isoformat() if b.creation_time else None)),
+            "durationMs": int(meta.get("durationms") or 0) or None,
+            "contentType": (b.content_settings.content_type if b.content_settings else None),
+            "audioUrl": _sas_lectura(svc, b.name),
+            "transcript": None,
+        }
+        nombre_t = _nombre_transcripcion(b.name)
+        if nombre_t in transcripciones and con_texto:
+            try:
+                crudo = cc.get_blob_client(nombre_t).download_blob().readall()
+                item["transcript"] = json.loads(crudo.decode("utf-8"))
+            except Exception as e:
+                logging.warning("No se pudo leer %s: %s", nombre_t, e)
+                item["transcript"] = {"error": "No se pudo leer la transcripcion almacenada."}
+        elif nombre_t in transcripciones:
+            item["transcript"] = {"disponible": True}
+        items.append(item)
+
+    return {"recordId": rid, "count": len(items), "items": items}
+
+
 def transcribe_blob(blob_name, locales=None, diarize=0):
     """Descarga el blob y lo transcribe con Fast Transcription de Azure AI Speech."""
     key = os.environ.get("SPEECH_KEY")
@@ -221,7 +306,7 @@ def transcribe_blob(blob_name, locales=None, diarize=0):
         "confidence": p.get("confidence"),
     } for p in data.get("phrases", [])]
 
-    return {
+    resultado = {
         "mock": False,
         "blobName": blob_name,
         "locales": locales,
@@ -230,6 +315,10 @@ def transcribe_blob(blob_name, locales=None, diarize=0):
         "phrases": phrases,
         "raw": data,
     }
+
+    # se persiste para poder recuperarla al reabrir el registro
+    resultado["persisted"] = guardar_transcripcion(blob_name, resultado)
+    return resultado
 
 
 STATUS_BY_ERROR = ((UserError, 400), (ConfigError, 500), (UpstreamError, 502))
