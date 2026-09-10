@@ -1,0 +1,228 @@
+"""
+Logica compartida del grabador: firma de SAS y transcripcion con Azure AI Speech.
+
+No depende de Flask ni de azure.functions, para que sirva igual detras de un
+App Service (webapp/app.py) o de una Azure Function (api/function_app.py).
+
+Variables de entorno:
+  AUDIO_STORAGE_CONNECTION  connection string de la cuenta de almacenamiento
+  AUDIO_CONTAINER           contenedor destino (default "grabaciones")
+  SAS_TTL_MINUTES           vigencia del SAS de subida (default 15)
+  SPEECH_KEY / SPEECH_REGION            recurso de Azure AI Speech
+  SPEECH_API_VERSION        version de la API de Fast Transcription
+"""
+
+import datetime
+import json
+import logging
+import os
+import re
+import uuid
+
+import requests
+from azure.storage.blob import (
+    BlobSasPermissions,
+    BlobServiceClient,
+    generate_blob_sas,
+)
+
+ALLOWED_EXT = {"wav", "webm", "ogg", "m4a", "mp3"}
+CONTENT_TYPES = {
+    "wav": "audio/wav", "webm": "audio/webm", "ogg": "audio/ogg",
+    "m4a": "audio/mp4", "mp3": "audio/mpeg",
+}
+MAX_LOCALES = 4
+_ID_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+class UserError(Exception):
+    """Entrada invalida del cliente -> 400."""
+
+
+class ConfigError(Exception):
+    """Falta configuracion del servidor -> 500."""
+
+
+class UpstreamError(Exception):
+    """Fallo de un servicio de Azure -> 502."""
+
+    def __init__(self, msg, detail=None):
+        super().__init__(msg)
+        self.detail = detail
+
+
+def container_name():
+    return os.environ.get("AUDIO_CONTAINER", "grabaciones")
+
+
+def _sas_ttl():
+    try:
+        return max(1, min(120, int(os.environ.get("SAS_TTL_MINUTES", "15"))))
+    except ValueError:
+        return 15
+
+
+_svc_cache = {}
+
+
+def _svc():
+    """BlobServiceClient reutilizado entre invocaciones del mismo proceso."""
+    cs = os.environ.get("AUDIO_STORAGE_CONNECTION")
+    if not cs:
+        raise ConfigError("Falta AUDIO_STORAGE_CONNECTION.")
+    if _svc_cache.get("cs") != cs:
+        _svc_cache.clear()
+        _svc_cache["cs"] = cs
+        _svc_cache["svc"] = BlobServiceClient.from_connection_string(cs)
+        _svc_cache["container_ready"] = False
+    return _svc_cache["svc"]
+
+
+def _ensure_container(svc):
+    """Crea el contenedor si falta, una sola vez por proceso."""
+    if _svc_cache.get("container_ready"):
+        return
+    try:
+        svc.create_container(container_name())
+    except Exception as e:                     # ya existe, o sin permiso para crear
+        logging.info("create_container: %s", e)
+    _svc_cache["container_ready"] = True
+
+
+def sanitize_id(raw):
+    """Convierte el ID del cliente en un segmento de ruta seguro para el blob."""
+    clean = _ID_RE.sub("-", (raw or "").strip().replace("{", "").replace("}", ""))
+    clean = clean.strip("-.")[:80]
+    if len(clean) < 3:
+        raise UserError("recordId invalido: minimo 3 caracteres utiles.")
+    return clean
+
+
+def make_upload_target(record_id, ext="wav"):
+    """Devuelve una URL de subida con SAS acotado a un unico blob."""
+    record_id = sanitize_id(record_id)
+    ext = str(ext or "wav").lower().lstrip(".")
+    if ext not in ALLOWED_EXT:
+        raise UserError("Extension no permitida: %s" % ext)
+
+    svc = _svc()
+    _ensure_container(svc)
+
+    key = getattr(svc.credential, "account_key", None)
+    if not key:
+        raise ConfigError(
+            "La connection string no trae AccountKey. Para firmar con identidad "
+            "administrada hay que usar un SAS de delegacion de usuario."
+        )
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ttl = _sas_ttl()
+    blob_name = "{}/{}-{}.{}".format(
+        record_id, now.strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8], ext
+    )
+
+    try:
+        token = generate_blob_sas(
+            account_name=svc.account_name,
+            container_name=container_name(),
+            blob_name=blob_name,
+            account_key=key,
+            permission=BlobSasPermissions(create=True, write=True),
+            start=now - datetime.timedelta(minutes=5),      # tolerancia de reloj
+            expiry=now + datetime.timedelta(minutes=ttl),
+        )
+    except Exception as e:
+        raise UpstreamError("No se pudo generar el SAS: %s" % e)
+
+    blob_url = "{}/{}/{}".format(svc.url.rstrip("/"), container_name(), blob_name)
+    return {
+        "blobName": blob_name,
+        "blobUrl": blob_url,
+        "uploadUrl": "%s?%s" % (blob_url, token),
+        "contentType": CONTENT_TYPES.get(ext, "application/octet-stream"),
+        "expiresOn": (now + datetime.timedelta(minutes=ttl)).isoformat(),
+    }
+
+
+def transcribe_blob(blob_name, locales=None, diarize=0):
+    """Descarga el blob y lo transcribe con Fast Transcription de Azure AI Speech."""
+    key = os.environ.get("SPEECH_KEY")
+    region = os.environ.get("SPEECH_REGION")
+    if not key or not region:
+        raise ConfigError("Faltan SPEECH_KEY / SPEECH_REGION.")
+
+    blob_name = (blob_name or "").lstrip("/")
+    if not blob_name or ".." in blob_name:
+        raise UserError("blobName invalido.")
+
+    locales = [str(l) for l in (locales or ["es-CL"])][:MAX_LOCALES]
+    try:
+        diarize = int(diarize or 0)
+    except (TypeError, ValueError):
+        diarize = 0
+
+    try:
+        audio = _svc().get_blob_client(container_name(), blob_name) \
+                      .download_blob().readall()
+    except Exception as e:
+        raise UserError("No se pudo leer el blob '%s': %s" % (blob_name, e))
+
+    definition = {"locales": locales, "profanityFilterMode": "None"}
+    if diarize > 1:
+        definition["diarization"] = {"enabled": True, "maxSpeakers": diarize}
+
+    api_version = os.environ.get("SPEECH_API_VERSION", "2024-11-15")
+    url = ("https://{}.api.cognitive.microsoft.com"
+           "/speechtotext/transcriptions:transcribe?api-version={}").format(region, api_version)
+
+    try:
+        r = requests.post(
+            url,
+            headers={"Ocp-Apim-Subscription-Key": key},
+            files={
+                "audio": (os.path.basename(blob_name), audio, "application/octet-stream"),
+                "definition": (None, json.dumps(definition), "application/json"),
+            },
+            timeout=600,
+        )
+    except requests.RequestException as e:
+        raise UpstreamError("Fallo al llamar a Azure AI Speech: %s" % e)
+
+    if r.status_code >= 300:
+        raise UpstreamError("Azure AI Speech respondio %d" % r.status_code,
+                            detail=r.text[:1000])
+
+    data = r.json()
+    combined = data.get("combinedPhrases") or []
+    phrases = [{
+        "offsetMilliseconds": p.get("offsetMilliseconds", 0),
+        "durationMilliseconds": p.get("durationMilliseconds", 0),
+        "text": p.get("text", ""),
+        "speaker": p.get("speaker"),
+        "confidence": p.get("confidence"),
+    } for p in data.get("phrases", [])]
+
+    return {
+        "mock": False,
+        "blobName": blob_name,
+        "locales": locales,
+        "text": combined[0].get("text", "") if combined else "",
+        "durationMilliseconds": data.get("durationMilliseconds"),
+        "phrases": phrases,
+        "raw": data,
+    }
+
+
+STATUS_BY_ERROR = ((UserError, 400), (ConfigError, 500), (UpstreamError, 502))
+
+
+def error_response(exc):
+    """Traduce una excepcion del core a (status, cuerpo json)."""
+    for kind, status in STATUS_BY_ERROR:
+        if isinstance(exc, kind):
+            body = {"error": str(exc)}
+            if getattr(exc, "detail", None):
+                body["detail"] = exc.detail
+            return status, body
+    logging.exception("Error no previsto")
+    return 500, {"error": "Error interno: %s" % exc}

@@ -1,0 +1,22 @@
+# artefactos locales del emulador
+_blobs_local/
+
+# secretos y configuracion local
+api/local.settings.json
+webapp/local.settings.json
+.env
+*.publishsettings
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
