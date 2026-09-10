@@ -120,6 +120,41 @@ function marcoBloqueaMic(){
 const AVISO_MARCO = 'La página está incrustada y el contenedor no le delegó el micrófono ' +
   '(falta allow="microphone" en el iframe). Ábrela en una pestaña nueva para grabar.';
 
+/**
+ * Origen del contenedor al que se le puede devolver la transcripción.
+ * Lo declara quien incrusta la página (?parent=https://...). Sin este dato NO
+ * se envía nada: postMessage con '*' entregaría el texto a cualquier sitio que
+ * decida enmarcar esta página.
+ */
+const ORIGEN_PADRE = (() => {
+  try {
+    const v = new URLSearchParams(location.search).get('parent');
+    if (!v) return null;
+    const u = new URL(v);
+    return u.protocol === 'https:' ? u.origin : null;
+  } catch (e) { return null; }
+})();
+
+/** Devuelve la transcripción al contenedor (el formulario de Dynamics). */
+function avisarAlPadre(t){
+  if (!EN_IFRAME || !ORIGEN_PADRE) return false;
+  try {
+    window.parent.postMessage({
+      tipo: 'wit-transcripcion',
+      recordId: S.id,
+      blobName: t.blobName,
+      texto: t.text,
+      locale: t.locale,
+      segmentos: t.phrases.length,
+      simulado: !!t.mock
+    }, ORIGEN_PADRE);
+    return true;
+  } catch (e) {
+    console.warn('No se pudo avisar al contenedor:', e);
+    return false;
+  }
+}
+
 /* ---------- configuración ---------- */
 function loadCfg(){
   try { Object.assign(S.cfg, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch (e) {}
@@ -600,7 +635,10 @@ async function transcribe(){
     S.tr = { text: full, phrases: phrases, mock: !!data.mock, raw: data,
              locale: S.cfg.locale, blobName: S.uploaded.blobName };
     renderTr();
-    setMsg($('trMsg'), 'Transcripción lista.', 'ok');
+    const enviado = avisarAlPadre(S.tr);
+    setMsg($('trMsg'), enviado
+      ? 'Transcripción lista y enviada a la descripción del caso.'
+      : 'Transcripción lista.', 'ok');
     $('s4state').textContent = 'Listo'; $('s4state').className = 'pill ok';
   } catch (e){
     setMsg($('trMsg'), 'Error al transcribir: ' + e.message, 'bad');
