@@ -134,3 +134,9 @@ code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding
   vertical-align:-2px;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
+
+/* accion dentro del banner (p. ej. abrir fuera del iframe de Dynamics) */
+.banner-act{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:6px;
+  background:var(--brand);color:#fff;font-weight:600;font-size:12.5px;text-decoration:none;
+  white-space:nowrap}
+.banner-act:hover{background:var(--brand-d)}

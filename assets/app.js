@@ -82,11 +82,43 @@ function setMsg(el, text, kind){
   el.textContent = text || '';
   el.className = 'msg' + (kind ? ' ' + kind : '');
 }
-function banner(text){
+/** banner de aviso; con accion opcional que abre esta misma pagina de primer nivel */
+function banner(text, conAccion){
   const b = $('banner');
   if (!text) { b.classList.add('hidden'); return; }
-  b.textContent = text; b.classList.remove('hidden');
+  b.textContent = text;
+  if (conAccion){
+    const a = document.createElement('a');
+    a.className = 'banner-act';
+    a.href = location.href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = 'Abrir en pestaña nueva';
+    b.appendChild(a);
+  }
+  b.classList.remove('hidden');
 }
+
+/* ---------- deteccion de incrustacion (Dynamics) ---------- */
+const EN_IFRAME = (() => {
+  try { return window.self !== window.top; } catch (e) { return true; }
+})();
+
+/**
+ * ¿El marco contenedor nos delego el microfono?
+ * Un iframe de otro origen sin allow="microphone" no puede usar getUserMedia,
+ * aunque el usuario acepte el permiso. Devuelve null si no se puede saber.
+ */
+function marcoBloqueaMic(){
+  try {
+    const fp = document.featurePolicy;
+    if (fp && typeof fp.allowsFeature === 'function') return !fp.allowsFeature('microphone');
+  } catch (e) {}
+  return null;
+}
+
+const AVISO_MARCO = 'La página está incrustada y el contenedor no le delegó el micrófono ' +
+  '(falta allow="microphone" en el iframe). Ábrela en una pestaña nueva para grabar.';
 
 /* ---------- configuración ---------- */
 function loadCfg(){
@@ -171,8 +203,13 @@ async function askPermission(){
     $('btnRec').disabled = false;
     $('vizmsg').textContent = 'Listo para grabar';
   } catch (e){
-    banner('No se pudo acceder al micrófono: ' + e.name + '. ' +
-      'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.');
+    // dentro de un iframe, NotAllowedError casi siempre es el marco, no el usuario
+    if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
+      banner(AVISO_MARCO, true);
+    } else {
+      banner('No se pudo acceder al micrófono: ' + e.name + '. ' +
+        'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.');
+    }
   }
 }
 async function listMics(){
@@ -269,7 +306,12 @@ async function startRec(){
       }
     });
   } catch (e){
-    banner('No se pudo abrir el micrófono seleccionado: ' + e.name); return;
+    if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
+      banner(AVISO_MARCO, true);
+    } else {
+      banner('No se pudo abrir el micrófono seleccionado: ' + e.name);
+    }
+    return;
   }
 
   S.ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -730,6 +772,9 @@ function init(){
     banner('La página no está en un contexto seguro. getUserMedia solo funciona con HTTPS o en localhost.');
   } else if (!navigator.mediaDevices || !window.MediaRecorder){
     banner('Este navegador no soporta MediaRecorder / mediaDevices. Use Edge o Chrome actualizado.');
+  } else if (EN_IFRAME && marcoBloqueaMic() === true){
+    // se avisa antes de que el usuario pierda tiempo intentando grabar
+    banner(AVISO_MARCO, true);
   }
 
   // ?id=XXX prellena el ID y &lock=1 lo fija (útil al abrir desde Dynamics)

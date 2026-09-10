@@ -47,8 +47,6 @@ def _principal():
 def _headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
-    # el micrófono solo se habilita para la propia pagina
-    resp.headers.setdefault("Permissions-Policy", "microphone=(self)")
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp

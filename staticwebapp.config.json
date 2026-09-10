@@ -4,12 +4,14 @@
   },
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/api/*"]
+    "exclude": [
+      "/assets/*",
+      "/api/*"
+    ]
   },
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": "microphone=(self)"
+    "Referrer-Policy": "no-referrer"
   },
   "mimeTypes": {
     ".json": "application/json",
@@ -20,7 +22,9 @@
   "routes": [
     {
       "route": "/api/*",
-      "headers": { "Cache-Control": "no-store" }
+      "headers": {
+        "Cache-Control": "no-store"
+      }
     }
   ]
 }
