@@ -89,6 +89,69 @@ WIT.Grabacion = (function () {
 
     // ---- montaje del iframe ------------------------------------------------
 
+    /**
+     * Ubica el elemento iframe real. La interfaz unificada no garantiza que
+     * getObject() devuelva el iframe, ni que este en el DOM cuando corre
+     * OnLoad, asi que hay un segundo camino por src.
+     */
+    function buscarIframe(destino) {
+        try {
+            var c = _formContext.getControl(IFRAME_NAME);
+            if (c && c.getObject) {
+                var o = c.getObject();
+                if (o) {
+                    if (o.tagName === "IFRAME") { return o; }
+                    if (o.querySelector) {
+                        var dentro = o.querySelector("iframe");
+                        if (dentro) { return dentro; }
+                    }
+                }
+            }
+        } catch (e) { /* se sigue por src */ }
+
+        var todos = document.getElementsByTagName("iframe");
+        for (var i = 0; i < todos.length; i++) {
+            var src = todos[i].getAttribute("src") || "";
+            var id = todos[i].getAttribute("id") || "";
+            if (src.indexOf(BASE_URL) === 0 || id.indexOf(IFRAME_NAME) !== -1) {
+                return todos[i];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Fija allow="microphone" y recarga el iframe para que aplique.
+     * Reintenta con espera creciente: la UCI puede renderizar el iframe
+     * despues del OnLoad, o re-renderizarlo borrando el atributo.
+     */
+    function aplicarAllow(destino, intento) {
+        intento = intento || 0;
+        var el = buscarIframe(destino);
+
+        if (el) {
+            if (el.getAttribute("allow") === "microphone") {
+                return true;                      // ya estaba, nada que hacer
+            }
+            el.setAttribute("allow", "microphone");
+            // el atributo solo aplica en una navegacion nueva
+            el.setAttribute("src", "about:blank");
+            setTimeout(function () {
+                try { el.setAttribute("src", destino); } catch (e) {}
+            }, 60);
+            console.log("WIT.Grabacion: allow=microphone aplicado (intento " + intento + ")");
+            return true;
+        }
+
+        if (intento < 6) {
+            setTimeout(function () { aplicarAllow(destino, intento + 1); }, 300 * (intento + 1));
+        } else {
+            console.warn("WIT.Grabacion: no se encontro el iframe; el microfono " +
+                         "quedara bloqueado y la pagina ofrecera abrirse aparte.");
+        }
+        return false;
+    }
+
     function montar(formContext, numeroCaso) {
         var control = formContext.getControl(IFRAME_NAME);
         if (!control) {
@@ -98,29 +161,14 @@ WIT.Grabacion = (function () {
 
         var destino = urlGrabador(numeroCaso);
 
-        try {
-            var el = control.getObject();
-            if (el && el.tagName !== "IFRAME") {
-                el = el.querySelector ? el.querySelector("iframe") : null;
-            }
-            if (el && el.tagName === "IFRAME") {
-                if (el.getAttribute("allow") !== "microphone") {
-                    el.setAttribute("allow", "microphone");
-                    el.setAttribute("src", "about:blank");
-                }
-                if (el.getAttribute("src") !== destino) {
-                    el.setAttribute("src", destino);
-                }
-                return true;
-            }
-        } catch (e) {
-            console.warn("WIT.Grabacion: no se pudo fijar allow=microphone", e);
+        // Primero la via soportada: deja el iframe en el DOM con la URL correcta.
+        try { control.setSrc(destino); } catch (e) {
+            console.error("WIT.Grabacion: setSrc fallo", e);
         }
 
-        try { control.setSrc(destino); } catch (e2) {
-            console.error("WIT.Grabacion: setSrc fallo", e2);
-        }
-        return false;
+        // Y luego el atributo que Dynamics no pone, cuando el elemento exista.
+        aplicarAllow(destino, 0);
+        return true;
     }
 
     // ---- transcripcion de vuelta ------------------------------------------

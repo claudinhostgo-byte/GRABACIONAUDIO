@@ -131,7 +131,10 @@ const ORIGEN_PADRE = (() => {
     const v = new URLSearchParams(location.search).get('parent');
     if (!v) return null;
     const u = new URL(v);
-    return u.protocol === 'https:' ? u.origin : null;
+    // Dynamics siempre es https; http se acepta solo en localhost, para desarrollo
+    const permitido = u.protocol === 'https:' ||
+                      ['localhost', '127.0.0.1'].indexOf(u.hostname) !== -1;
+    return permitido ? u.origin : null;
   } catch (e) { return null; }
 })();
 
@@ -279,11 +282,22 @@ function vizGeom(){
   return { ctx, w, h, bw: (w - GAP * (BARS - 1)) / BARS };
 }
 
-function bar(ctx, x, mid, bw, bh, live){
+/** colores del visualizador tomados del CSS, para que siga el tema activo */
+function paleta(){
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n, d) => ((cs.getPropertyValue(n) || '').trim() || d);
+  return {
+    a: v('--viz-a', '#d13438'),
+    b: v('--viz-b', '#ffb900'),
+    idle: v('--viz-idle', '#c8c6c4')
+  };
+}
+
+function bar(ctx, x, mid, bw, bh, live, p){
   const g = ctx.createLinearGradient(0, mid - bh / 2, 0, mid + bh / 2);
-  g.addColorStop(0,   live ? '#ff6b6f' : '#3b4250');
-  g.addColorStop(0.5, live ? '#ffd166' : '#3b4250');
-  g.addColorStop(1,   live ? '#ff6b6f' : '#3b4250');
+  g.addColorStop(0,   live ? p.a : p.idle);
+  g.addColorStop(0.5, live ? p.b : p.idle);
+  g.addColorStop(1,   live ? p.a : p.idle);
   ctx.fillStyle = g;
   ctx.beginPath();
   const r = Math.min(bw / 2, 3);
@@ -295,12 +309,14 @@ function bar(ctx, x, mid, bw, bh, live){
 /** barras planas en reposo, para que el recuadro no se vea vacío */
 function drawIdle(){
   const { ctx, w, h, bw } = vizGeom();
+  const p = paleta();
   ctx.clearRect(0, 0, w, h);
-  for (let i = 0; i < BARS; i++) bar(ctx, i * (bw + GAP), h / 2, bw, 2, false);
+  for (let i = 0; i < BARS; i++) bar(ctx, i * (bw + GAP), h / 2, bw, 2, false, p);
 }
 
 function startViz(){
   const { ctx, w, h, bw } = vizGeom();
+  const p = paleta();
   const bins = new Uint8Array(S.analyser.frequencyBinCount);
 
   const draw = () => {
@@ -314,7 +330,7 @@ function startViz(){
       let sum = 0;
       for (let j = 0; j < step; j++) sum += bins[i * step + j] || 0;
       const v = (sum / step) / 255;
-      bar(ctx, i * (bw + GAP), mid, bw, Math.max(2, v * (h - 26)), live);
+      bar(ctx, i * (bw + GAP), mid, bw, Math.max(2, v * (h - 26)), live, p);
     }
   };
   cancelAnimationFrame(S.raf); draw();
@@ -801,6 +817,13 @@ function download(){
 
 /* ---------- arranque ---------- */
 function init(){
+  // incrustada en un formulario: sin encabezado propio, sin marco y siempre
+  // en claro, para no verse como una isla ajena dentro de Dynamics
+  if (EN_IFRAME){
+    document.documentElement.classList.add('embed');
+    document.body.classList.add('embed');
+  }
+
   loadCfg(); renderHist(); drawIdle();
   window.addEventListener('resize', () => {
     if (!S.rec || S.rec.state === 'inactive') drawIdle();
