@@ -85,12 +85,31 @@ con permisos `create`+`write` (nunca `read`/`list`/`delete`) y vigencia de horas
 
 ### 1. Crear los recursos
 
-```bash
-az group create -n rg-grabacion-demo -l brazilsouth
-az storage account create -n <cuenta> -g rg-grabacion-demo -l brazilsouth --sku Standard_LRS --kind StorageV2
-az storage container create --account-name <cuenta> -n grabaciones
-az cognitiveservices account create -n <speech> -g rg-grabacion-demo -l brazilsouth --kind SpeechServices --sku S0 --yes
+Una vez que exista la Static Web App, `infra/setup.ps1` hace todo el resto en un paso: lee el
+hostname real de la SWA, crea la cuenta de almacenamiento y el contenedor, configura el CORS del
+blob con ese dominio, crea el recurso de Speech y carga las variables de entorno en la SWA sin
+que los secretos pasen por el portapapeles. Es idempotente.
+
+```powershell
+winget install Microsoft.AzureCLI
 ```
+
+```powershell
+az login
+```
+
+```powershell
+.\infra\setup.ps1
+```
+
+Parámetros con default: `-ResourceGroup`, `-SwaName`, `-Location`, `-Container`. Los nombres de la
+cuenta de almacenamiento y del recurso de Speech se generan con sufijo aleatorio salvo que se
+pasen con `-StorageName` / `-SpeechName`.
+
+Crea recursos facturables: una cuenta `Standard_LRS` y un Speech `S0` de pago por uso.
+
+Los pasos 3 y 4 de más abajo quedan cubiertos por el script; están documentados para hacerlos a
+mano si se prefiere.
 
 ### 2. Crear la Static Web App conectada al repo
 
