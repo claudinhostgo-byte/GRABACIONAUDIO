@@ -275,3 +275,19 @@ body.solo-clip .campo{max-height:220px}
 body.solo-clip .step-hd .num{display:none}
 body.solo-clip #clipIdInfo{display:block}
 #clipIdInfo{display:none;font-size:12px;color:var(--ink2);margin-bottom:8px}
+
+/* ventana minima de autorizacion (?solo=permiso) */
+#permiso{display:none}
+body.solo-permiso #permiso{display:block}
+body.solo-permiso .hdr,
+body.solo-permiso #cfgPanel,
+body.solo-permiso #step1,
+body.solo-permiso #existentes,
+body.solo-permiso #step2,
+body.solo-permiso #step3,
+body.solo-permiso #step4,
+body.solo-permiso #clip,
+body.solo-permiso #historial,
+body.solo-permiso .ftr{display:none !important}
+body.solo-permiso .shell{max-width:none;padding:12px}
+body.solo-permiso .card{margin-bottom:0;box-shadow:none}

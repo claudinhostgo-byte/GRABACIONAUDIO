@@ -196,6 +196,18 @@
     </div>
   </section>
 
+  <!-- ===== Autorización de cámara (ventana aparte) ===== -->
+  <section class="card" id="permiso">
+    <h2>Autorizar cámara</h2>
+    <p class="hint">Al presionar el botón, el navegador va a pedir autorización para usar la
+      cámara y el micrófono en este sitio. Acepte y cierre esta ventana.</p>
+    <div class="ctrls">
+      <button id="btnPermitirAqui" class="primary" type="button">Permitir cámara</button>
+      <button id="btnCerrarPermiso" class="ghost" type="button">Cerrar</button>
+    </div>
+    <div id="permisoMsg" class="msg"></div>
+  </section>
+
   <!-- ===== Clip de evidencia ===== -->
   <section class="card step disabled" id="clip">
     <div class="step-hd"><span class="num">&#9679;</span><h2>Clip de evidencia (opcional)</h2>
@@ -219,7 +231,7 @@
           </select>
         </div>
         <button id="btnCam" class="ghost" type="button">Permitir cámara</button>
-        <button id="btnCamVentana" class="primary hidden" type="button">Grabar en ventana aparte</button>
+        <button id="btnCamVentana" class="primary hidden" type="button">Autorizar cámara</button>
       </div>
 
       <div class="campo">

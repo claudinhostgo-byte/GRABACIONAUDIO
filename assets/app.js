@@ -115,8 +115,10 @@ function msgConEscape(el, texto, etiqueta){
   el.appendChild(enlaceEscape(etiqueta));
 }
 
-/** Modo ventana compacta: la misma pagina mostrando solo el clip. */
-const SOLO_CLIP = new URLSearchParams(location.search).get('solo') === 'clip';
+/** Modos compactos de la misma pagina, abiertos como ventana propia. */
+const SOLO = new URLSearchParams(location.search).get('solo');
+const SOLO_CLIP    = SOLO === 'clip';
+const SOLO_PERMISO = SOLO === 'permiso';
 
 /* ---------- deteccion de incrustacion (Dynamics) ---------- */
 const EN_IFRAME = (() => {
@@ -752,37 +754,58 @@ async function subirClip(){
 }
 
 /**
- * Abre la misma pagina en modo compacto, como ventana propia. Al ser una
- * ventana de primer nivel el navegador si concede la camara, y al conservar
- * window.opener puede avisar de vuelta cuando el clip quede subido.
+ * Abre la misma página en modo autorización, como ventana propia y pequeña.
+ * Fuera del iframe el navegador sí muestra su diálogo nativo de permiso.
  */
-function abrirVentanaClip(){
+function abrirVentanaPermiso(){
   const u = new URL(location.href);
-  u.searchParams.set('id', S.id);
-  u.searchParams.set('lock', '1');
-  u.searchParams.set('solo', 'clip');
+  u.searchParams.set('solo', 'permiso');
   u.searchParams.delete('parent');
-  const w = window.open(u.toString(), 'wit_clip_' + S.id,
-                        'width=560,height=720,menubar=no,toolbar=no,location=no');
+  u.searchParams.delete('id');
+  u.searchParams.delete('lock');
+  const w = window.open(u.toString(), 'wit_permiso',
+                        'width=440,height=320,menubar=no,toolbar=no,location=no');
   if (!w){
     setMsg($('clipMsg'), 'El navegador bloqueó la ventana emergente. ' +
-      'Permita las ventanas emergentes para este sitio.', 'bad');
+      'Permita las ventanas emergentes para este sitio y reintente.', 'bad');
     return;
   }
-  setMsg($('clipMsg'), 'Grabe el clip en la ventana que se abrió. ' +
-    'Al terminar, esta vista se actualiza sola.');
+  setMsg($('clipMsg'), 'Autorice la cámara en la ventana que se abrió y vuelva aquí.');
   w.focus();
 }
 
-/** Aviso desde la ventana compacta cuando el clip ya quedo subido. */
-function escucharVentanaClip(){
+/** La ventana de autorización avisa cuando el usuario ya aceptó. */
+function escucharVentanaPermiso(){
   window.addEventListener('message', (ev) => {
     if (ev.origin !== location.origin) return;
     const d = ev.data;
-    if (!d || d.tipo !== 'wit-clip-listo') return;
-    setMsg($('clipMsg'), 'Clip subido desde la ventana aparte: ' + d.blobName, 'ok');
-    if (S.id) buscarExistentes();
+    if (!d || d.tipo !== 'wit-permiso-ok') return;
+    setMsg($('clipMsg'), 'Cámara autorizada. Reintentando aquí…');
+    permitirCamara();
   });
+}
+
+/** Pide el permiso en la ventana de autorización y avisa a quien la abrió. */
+async function permitirAqui(){
+  const btn = $('btnPermitirAqui');
+  btn.disabled = true;
+  setMsg($('permisoMsg'), 'Esperando su respuesta en el diálogo del navegador…');
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    // solo interesa que quede concedido: no se retiene la captura
+    st.getTracks().forEach((t) => t.stop());
+    setMsg($('permisoMsg'), 'Cámara y micrófono autorizados. Ya puede cerrar esta ventana.', 'ok');
+    if (window.opener && !window.opener.closed){
+      try {
+        window.opener.postMessage({ tipo: 'wit-permiso-ok' }, location.origin);
+      } catch (e) { console.warn('No se pudo avisar a la ventana de origen', e); }
+    }
+  } catch (e){
+    btn.disabled = false;
+    setMsg($('permisoMsg'), e.name === 'NotAllowedError'
+      ? 'Autorización rechazada. Vuelva a intentarlo y elija Permitir.'
+      : 'No se pudo autorizar: ' + e.name, 'bad');
+  }
 }
 
 function habilitarClip(){
@@ -1401,16 +1424,20 @@ function init(){
     document.body.classList.add('solo-clip');
     document.title = 'Clip de evidencia';
   }
+  if (SOLO_PERMISO){
+    document.body.classList.add('solo-permiso');
+    document.title = 'Autorizar cámara';
+  }
 
   // dentro de un marco sin cámara delegada, la ventana aparte es el camino:
   // conserva el número de caso y avisa de vuelta al terminar
   if (EN_IFRAME && marcoBloqueaCam() === true){
-    setMsg($('clipMsg'), 'El contenedor no delegó la cámara. Grabe el clip en una ' +
-      'ventana aparte: al terminar vuelve solo a este caso.', 'bad');
-    $('camHint').textContent = 'Cámara bloqueada por el contenedor.';
+    setMsg($('clipMsg'), 'La cámara no está autorizada en este contexto. ' +
+      'Use «Autorizar cámara»: se abre una ventana donde el navegador pide el permiso.', 'bad');
+    $('camHint').textContent = 'Cámara no autorizada.';
     $('btnCam').classList.add('hidden');
     $('btnCamVentana').classList.remove('hidden');
-    escucharVentanaClip();
+    escucharVentanaPermiso();
   }
 
   // ?id=XXX prellena el ID y &lock=1 lo fija (útil al abrir desde Dynamics)
@@ -1447,7 +1474,9 @@ function init(){
   };
 
   $('btnCam').onclick        = permitirCamara;
-  $('btnCamVentana').onclick = abrirVentanaClip;
+  $('btnCamVentana').onclick = abrirVentanaPermiso;
+  $('btnPermitirAqui').onclick  = permitirAqui;
+  $('btnCerrarPermiso').onclick = () => window.close();
   $('btnCerrarVentana').onclick = () => { detenerCamara(); window.close(); };
   $('camSel').onchange     = previsualizar;
   $('btnClipRec').onclick  = grabarClip;
