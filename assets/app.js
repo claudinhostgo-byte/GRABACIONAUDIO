@@ -50,6 +50,8 @@ const S = {
   t0: 0, accMs: 0, tick: 0,
   blob: null, mime: '', durMs: 0, blobName: '',
   uploaded: null, tr: null, segEls: [], activeSeg: -1,
+  cam: { stream: null, rec: null, chunks: [], blob: null, mime: '', durMs: 0,
+         t0: 0, tick: 0, tope: 60000, blobName: '' },
   cfg: Object.assign({}, CFG_DEFAULT)
 };
 
@@ -226,6 +228,7 @@ function confirmId(){
   refreshUploadBtn();
   // el paso 2 se habilita solo si no hay una grabación previa para este ID
   bloquearGrabacion();
+  habilitarClip();
   buscarExistentes();
 }
 function editId(){
@@ -292,17 +295,36 @@ async function buscarExistentes(){
   }
 }
 
+const esClip = (it) => it.kind === 'video' ||
+  /^video\//.test(it.contentType || '') || /(^|\/)clip-/.test(it.blobName || '');
+
 function renderExistentes(d){
   const cont = $('exList');
   cont.innerHTML = '';
   d.items.forEach((it) => cont.appendChild(tarjetaExistente(it)));
-
   $('existentes').classList.remove('hidden');
-  setMsg($('buscaMsg'),
-    d.count + (d.count === 1 ? ' grabación ya registrada' : ' grabaciones ya registradas') +
-    ' para este ID. Puede escucharla y transcribirla aquí.', 'ok');
-  $('s2state').textContent = 'Ya existe grabación'; $('s2state').className = 'pill';
-  $('step2').classList.add('disabled');
+
+  // Solo el audio de la conversación bloquea el paso 2. Un clip de evidencia
+  // es aditivo: que exista no significa que la conversación esté grabada.
+  const audios = d.items.filter((it) => !esClip(it)).length;
+  const clips  = d.items.length - audios;
+
+  const partes = [];
+  if (audios) partes.push(audios + (audios === 1 ? ' grabación de audio' : ' grabaciones de audio'));
+  if (clips)  partes.push(clips + (clips === 1 ? ' clip de evidencia' : ' clips de evidencia'));
+
+  if (audios > 0){
+    setMsg($('buscaMsg'), 'Ya hay ' + partes.join(' y ') +
+      ' para este ID. Puede escuchar y transcribir aquí.', 'ok');
+    $('s2state').textContent = 'Ya existe grabación'; $('s2state').className = 'pill';
+    $('step2').classList.add('disabled');
+    $('btnOtra').classList.remove('hidden');
+  } else {
+    setMsg($('buscaMsg'), 'Hay ' + partes.join(' y ') +
+      ' para este ID, pero todavía no hay audio de la conversación: puede grabarlo.', 'ok');
+    desbloquearGrabacion();
+    $('btnOtra').classList.add('hidden');
+  }
 }
 
 function tarjetaExistente(it){
@@ -321,10 +343,16 @@ function tarjetaExistente(it){
   });
   box.appendChild(meta);
 
-  if (it.audioUrl){
-    const au = document.createElement('audio');
-    au.controls = true; au.className = 'player'; au.src = it.audioUrl;
-    box.appendChild(au);
+  const src = it.url || it.audioUrl;
+  if (src){
+    const esVideo = it.kind === 'video' ||
+                    /^video\//.test(it.contentType || '') ||
+                    /(^|\/)clip-/.test(it.blobName || '');
+    const el = document.createElement(esVideo ? 'video' : 'audio');
+    el.controls = true; el.src = src;
+    el.className = esVideo ? 'camprev exvideo' : 'player';
+    if (esVideo) el.playsInline = true;
+    box.appendChild(el);
   }
 
   const zona = document.createElement('div');
@@ -337,6 +365,15 @@ function tarjetaExistente(it){
 /** Contenido de transcripción de una grabación existente, o el botón para pedirla. */
 function pintarTranscripcion(zona, it){
   zona.innerHTML = '';
+  // el clip de evidencia no se transcribe: el texto sale del audio de la
+  // conversación, no del video
+  if (it.kind === 'video' || /(^|\/)clip-/.test(it.blobName || '')){
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Clip de evidencia. No se transcribe.';
+    zona.appendChild(p);
+    return;
+  }
   const t = it.transcript;
 
   const h = document.createElement('h3');
@@ -447,6 +484,238 @@ async function transcribirExistente(it, zona, btn){
     btn.disabled = false;
     if (est) setMsg(est, 'Error al transcribir: ' + e.message, 'bad');
   }
+}
+
+
+/* ---------- Clip de evidencia ---------- */
+
+const CLIP_MIMES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus',
+                    'video/webm', 'video/mp4'];
+
+function clipMime(){
+  for (const c of CLIP_MIMES){
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+}
+const clipExt = (t) => /mp4/.test(t) ? 'mp4' : 'webm';
+
+async function permitirCamara(){
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+    tmp.getTracks().forEach((t) => t.stop());
+    await listarCamaras();
+    $('btnCam').classList.add('hidden');
+    $('btnClipRec').disabled = false;
+    await previsualizar();
+  } catch (e){
+    if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
+      setMsg($('clipMsg'), 'El contenedor no delegó la cámara. En Dynamics el iframe ' +
+        'necesita allow="microphone; camera". Ábrela en pestaña nueva para grabar el clip.', 'bad');
+    } else {
+      setMsg($('clipMsg'), 'No se pudo acceder a la cámara: ' + e.name, 'bad');
+    }
+  }
+}
+
+async function listarCamaras(){
+  const devs = (await navigator.mediaDevices.enumerateDevices())
+    .filter((d) => d.kind === 'videoinput');
+  const sel = $('camSel'), prev = sel.value;
+  sel.innerHTML = '';
+  if (!devs.length){
+    sel.innerHTML = '<option>-- sin cámaras detectadas --</option>';
+    sel.disabled = true; return;
+  }
+  devs.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || ('Cámara ' + (i + 1));
+    sel.appendChild(o);
+  });
+  sel.disabled = false;
+  if (prev && devs.some((d) => d.deviceId === prev)) sel.value = prev;
+}
+
+/** Previsualización en vivo; se rearma al cambiar de cámara. */
+async function previsualizar(){
+  detenerCamara();
+  try {
+    const devId = $('camSel').value;
+    S.cam.stream = await navigator.mediaDevices.getUserMedia({
+      video: devId ? { deviceId: { exact: devId } } : true,
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+    const v = $('camPrev');
+    v.controls = false;
+    v.srcObject = S.cam.stream;
+    v.muted = true;                      // evita realimentación con el micrófono
+    await v.play().catch(() => {});
+    setMsg($('clipMsg'), '');
+  } catch (e){
+    setMsg($('clipMsg'), 'No se pudo abrir la cámara: ' + e.name, 'bad');
+  }
+}
+
+function detenerCamara(){
+  if (S.cam.stream){
+    S.cam.stream.getTracks().forEach((t) => t.stop());
+    S.cam.stream = null;
+  }
+}
+
+function grabarClip(){
+  if (!S.cam.stream){ setMsg($('clipMsg'), 'Primero permita la cámara.', 'bad'); return; }
+  S.cam.tope = (Number($('clipMax').value) || 60) * 1000;
+  S.cam.mime = clipMime();
+  S.cam.chunks = [];
+  S.cam.blob = null;
+
+  try {
+    S.cam.rec = new MediaRecorder(S.cam.stream,
+      S.cam.mime ? { mimeType: S.cam.mime, videoBitsPerSecond: 1500000 } : undefined);
+  } catch (e){
+    setMsg($('clipMsg'), 'Este navegador no puede grabar video: ' + e.message, 'bad'); return;
+  }
+
+  S.cam.rec.ondataavailable = (e) => { if (e.data && e.data.size) S.cam.chunks.push(e.data); };
+  S.cam.rec.onstop = clipDetenido;
+  S.cam.rec.start(1000);
+  S.cam.t0 = performance.now();
+
+  // el tope de duración es parte del diseño: un clip de evidencia no debe
+  // convertirse en una grabación larga sin que nadie lo note
+  S.cam.tick = setInterval(() => {
+    const ms = performance.now() - S.cam.t0;
+    const resta = Math.max(0, S.cam.tope - ms);
+    $('clipTimer').textContent = fmtTime(ms) + '  /  -' + fmtTime(resta);
+    if (ms >= S.cam.tope) detenerClip();
+  }, 200);
+
+  $('clipTimer').classList.remove('hidden');
+  $('camDot').classList.remove('hidden');
+  $('btnClipRec').disabled = true; $('btnClipStop').disabled = false;
+  $('btnClipUp').disabled = true; $('btnClipDrop').disabled = true;
+  $('camSel').disabled = true; $('clipMax').disabled = true;
+  $('sClipState').textContent = 'Grabando'; $('sClipState').className = 'pill live';
+  setMsg($('clipMsg'), '');
+}
+
+function detenerClip(){
+  if (!S.cam.rec || S.cam.rec.state === 'inactive') return;
+  S.cam.durMs = performance.now() - S.cam.t0;
+  clearInterval(S.cam.tick);
+  S.cam.rec.stop();
+  $('btnClipStop').disabled = true;
+  $('camDot').classList.add('hidden');
+}
+
+function clipDetenido(){
+  const blob = new Blob(S.cam.chunks, { type: S.cam.mime || 'video/webm' });
+  S.cam.blob = blob;
+  const ext = clipExt(blob.type);
+  S.cam.blobName = 'clip-' + stamp(new Date()) + '-' + rand4() + '.' + ext;
+
+  const v = $('camPrev');
+  v.srcObject = null;
+  v.src = URL.createObjectURL(blob);
+  v.muted = false; v.controls = true;
+
+  $('clipMeta').innerHTML = '';
+  ['Duración: ' + fmtTime(S.cam.durMs), 'Tamaño: ' + fmtSize(blob.size), 'Tipo: ' + blob.type]
+    .forEach((t) => { const sp = document.createElement('span'); sp.textContent = t;
+                      $('clipMeta').appendChild(sp); });
+
+  $('btnClipRec').disabled = false; $('btnClipUp').disabled = false;
+  $('btnClipDrop').disabled = false;
+  $('camSel').disabled = false; $('clipMax').disabled = false;
+  $('clipTimer').classList.add('hidden');
+  $('sClipState').textContent = 'Listo para subir'; $('sClipState').className = 'pill';
+
+  if (blob.size > 60 * 1024 * 1024){
+    setMsg($('clipMsg'), 'El clip pesa ' + fmtSize(blob.size) +
+      '. La subida es de una sola pieza y en una red inestable puede fallar.', 'bad');
+  }
+}
+
+async function descartarClip(){
+  S.cam.blob = null; S.cam.chunks = []; S.cam.durMs = 0;
+  const v = $('camPrev');
+  v.controls = false; v.removeAttribute('src'); v.load();
+  $('clipMeta').innerHTML = '';
+  $('btnClipUp').disabled = true; $('btnClipDrop').disabled = true;
+  $('clipProgWrap').classList.add('hidden'); setMsg($('clipMsg'), '');
+  $('sClipState').textContent = 'Listo'; $('sClipState').className = 'pill';
+  await previsualizar();
+}
+
+async function subirClip(){
+  if (!S.cam.blob || !S.id) return;
+  $('btnClipUp').disabled = true;
+  $('clipProgWrap').classList.remove('hidden');
+  $('clipProgBar').style.width = '0'; $('clipProgTxt').textContent = '0%';
+  setMsg($('clipMsg'), 'Subiendo clip...');
+
+  const contentType = S.cam.blob.type || 'video/webm';
+  const ext = clipExt(contentType);
+
+  try {
+    let t;
+    if (S.cfg.mode === 'sas'){
+      const u = new URL(S.cfg.sasUrl);
+      const base = u.origin + u.pathname.replace(/\/+$/, '');
+      const path = (S.id + '/' + S.cam.blobName).split('/').map(encodeURIComponent).join('/');
+      t = { uploadUrl: base + '/' + path + u.search, blobUrl: base + '/' + path,
+            blobName: S.id + '/' + S.cam.blobName, contentType: contentType };
+    } else {
+      let url = S.cfg.fnUrl;
+      if (S.cfg.fnKey) url += (url.includes('?') ? '&' : '?') + 'code=' + encodeURIComponent(S.cfg.fnKey);
+      const res = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: S.id, ext: ext, kind: 'video',
+                               contentType: contentType, durationMs: Math.round(S.cam.durMs) })
+      });
+      if (!res.ok) throw new Error('La Function respondió ' + res.status + ': ' +
+                                   (await res.text()).slice(0, 200));
+      const j = await res.json();
+      if (!j.uploadUrl) throw new Error('La Function no devolvió uploadUrl.');
+      t = { uploadUrl: j.uploadUrl, blobUrl: j.blobUrl || j.uploadUrl.split('?')[0],
+            blobName: j.blobName, contentType: j.contentType || contentType };
+    }
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', t.uploadUrl, true);
+      xhr.setRequestHeader('x-ms-blob-type', 'BlockBlob');
+      xhr.setRequestHeader('Content-Type', t.contentType);
+      xhr.setRequestHeader('x-ms-blob-content-type', t.contentType);
+      xhr.setRequestHeader('x-ms-meta-recordid', asciiMeta(S.id));
+      xhr.setRequestHeader('x-ms-meta-durationms', String(Math.round(S.cam.durMs)));
+      xhr.setRequestHeader('x-ms-meta-createdat', new Date().toISOString());
+      xhr.setRequestHeader('x-ms-meta-source', 'web-recorder-clip');
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const p = Math.round(e.loaded / e.total * 100);
+        $('clipProgBar').style.width = 'calc(' + p + '% - ' + (p * 0.52) + 'px)';
+        $('clipProgTxt').textContent = p + '%';
+      };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve()
+        : reject(new Error('HTTP ' + xhr.status + ' ' + String(xhr.responseText).slice(0, 300)));
+      xhr.onerror = () => reject(new Error('Fallo de red o CORS.'));
+      xhr.send(S.cam.blob);
+    });
+
+    setMsg($('clipMsg'), 'Clip subido: ' + t.blobName, 'ok');
+    $('sClipState').textContent = 'Subido'; $('sClipState').className = 'pill ok';
+  } catch (e){
+    setMsg($('clipMsg'), 'Error al subir el clip: ' + e.message, 'bad');
+    $('btnClipUp').disabled = false;
+  }
+}
+
+function habilitarClip(){
+  $('clip').classList.remove('disabled');
+  $('sClipState').textContent = 'Listo'; $('sClipState').className = 'pill';
 }
 
 /* ---------- Paso 2: micrófonos ---------- */
@@ -1089,6 +1358,13 @@ function init(){
     setMsg($('buscaMsg'), 'Grabación habilitada manualmente: se agregará otra grabación a este ID.');
   };
 
+  $('btnCam').onclick      = permitirCamara;
+  $('camSel').onchange     = previsualizar;
+  $('btnClipRec').onclick  = grabarClip;
+  $('btnClipStop').onclick = detenerClip;
+  $('btnClipUp').onclick   = subirClip;
+  $('btnClipDrop').onclick = descartarClip;
+
   $('btnTr').onclick     = transcribe;
   $('btnTrCopy').onclick = () => navigator.clipboard.writeText(S.tr.text)
     .then(() => setMsg($('trMsg'), 'Texto copiado al portapapeles.', 'ok'));
@@ -1111,8 +1387,12 @@ function init(){
     }
   }
 
+  window.addEventListener('beforeunload', () => detenerCamara());
   window.addEventListener('beforeunload', (e) => {
-    if (S.rec && S.rec.state !== 'inactive'){ e.preventDefault(); e.returnValue = ''; }
+    if ((S.rec && S.rec.state !== 'inactive') ||
+        (S.cam.rec && S.cam.rec.state !== 'inactive')){
+      e.preventDefault(); e.returnValue = '';
+    }
   });
 }
 document.addEventListener('DOMContentLoaded', init);

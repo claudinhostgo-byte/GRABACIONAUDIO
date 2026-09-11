@@ -196,6 +196,51 @@
     </div>
   </section>
 
+  <!-- ===== Clip de evidencia ===== -->
+  <section class="card step disabled" id="clip">
+    <div class="step-hd"><span class="num">&#9679;</span><h2>Clip de evidencia (opcional)</h2>
+      <span id="sClipState" class="pill">Bloqueado</span></div>
+    <div class="step-bd">
+      <p class="hint">Video corto para dejar constancia de algo físico: un equipo, un daño, una
+        instalación. Se guarda junto al audio, bajo el mismo número de caso. No se transcribe.</p>
+
+      <div class="microw">
+        <div class="grow">
+          <label for="camSel">Cámara</label>
+          <select id="camSel" disabled><option>— sin permiso de cámara —</option></select>
+        </div>
+        <div>
+          <label for="clipMax">Duración máxima</label>
+          <select id="clipMax">
+            <option value="30">30 segundos</option>
+            <option value="60" selected>60 segundos</option>
+            <option value="120">2 minutos</option>
+          </select>
+        </div>
+        <button id="btnCam" class="ghost" type="button">Permitir cámara</button>
+      </div>
+
+      <div class="campo">
+        <video id="camPrev" class="camprev" playsinline muted></video>
+        <div id="camDot" class="dot hidden"></div>
+        <div id="clipTimer" class="cliptimer hidden">00:00</div>
+      </div>
+
+      <div class="ctrls">
+        <button id="btnClipRec" class="rec" type="button" disabled>
+          <span class="ico">&#9679;</span><span class="lbl">Grabar clip</span>
+        </button>
+        <button id="btnClipStop" class="ghost" type="button" disabled>Detener</button>
+        <button id="btnClipUp" class="primary" type="button" disabled>Subir clip</button>
+        <button id="btnClipDrop" class="ghost" type="button" disabled>Descartar</button>
+      </div>
+
+      <div class="meta" id="clipMeta"></div>
+      <div id="clipProgWrap" class="prog hidden"><div id="clipProgBar" class="bar"></div><span id="clipProgTxt">0%</span></div>
+      <div id="clipMsg" class="msg"></div>
+    </div>
+  </section>
+
   <!-- ===== Historial ===== -->
   <section class="card">
     <h2>Grabaciones subidas en esta sesión</h2>

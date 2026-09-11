@@ -27,11 +27,15 @@ from azure.storage.blob import (
     generate_blob_sas,
 )
 
-ALLOWED_EXT = {"wav", "webm", "ogg", "m4a", "mp3"}
+ALLOWED_EXT = {"wav", "webm", "ogg", "m4a", "mp3", "mp4"}
 CONTENT_TYPES = {
     "wav": "audio/wav", "webm": "audio/webm", "ogg": "audio/ogg",
     "m4a": "audio/mp4", "mp3": "audio/mpeg",
 }
+# el clip de evidencia comparte extension con el audio (webm), asi que el tipo
+# lo decide el llamador y no la extension
+CONTENT_TYPES_VIDEO = {"webm": "video/webm", "mp4": "video/mp4"}
+PREFIJO_CLIP = "clip-"
 MAX_LOCALES = 4
 _ID_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -115,12 +119,21 @@ def sanitize_id(raw):
     return clean
 
 
-def make_upload_target(record_id, ext="wav"):
-    """Devuelve una URL de subida con SAS acotado a un unico blob."""
+def make_upload_target(record_id, ext="wav", kind="audio"):
+    """Devuelve una URL de subida con SAS acotado a un unico blob.
+
+    kind "video" marca el clip de evidencia: cambia el tipo de contenido y
+    antepone un prefijo al nombre, para distinguirlo del audio de la
+    conversacion al listar.
+    """
     record_id = sanitize_id(record_id)
     ext = str(ext or "wav").lower().lstrip(".")
     if ext not in ALLOWED_EXT:
         raise UserError("Extension no permitida: %s" % ext)
+
+    kind = "video" if str(kind).lower() == "video" else "audio"
+    if kind == "video" and ext not in CONTENT_TYPES_VIDEO:
+        raise UserError("Extension no permitida para video: %s" % ext)
 
     svc = _svc()
     _ensure_container(svc)
@@ -134,8 +147,10 @@ def make_upload_target(record_id, ext="wav"):
 
     now = datetime.datetime.now(datetime.timezone.utc)
     ttl = _sas_ttl()
-    blob_name = "{}/{}-{}.{}".format(
-        record_id, now.strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8], ext
+    blob_name = "{}/{}{}-{}.{}".format(
+        record_id,
+        PREFIJO_CLIP if kind == "video" else "",
+        now.strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8], ext
     )
 
     try:
@@ -156,7 +171,9 @@ def make_upload_target(record_id, ext="wav"):
         "blobName": blob_name,
         "blobUrl": blob_url,
         "uploadUrl": "%s?%s" % (blob_url, token),
-        "contentType": CONTENT_TYPES.get(ext, "application/octet-stream"),
+        "kind": kind,
+        "contentType": (CONTENT_TYPES_VIDEO if kind == "video" else CONTENT_TYPES)
+                       .get(ext, "application/octet-stream"),
         "expiresOn": (now + datetime.timedelta(minutes=ttl)).isoformat(),
     }
 
@@ -220,14 +237,19 @@ def listar_grabaciones(record_id, con_texto=True):
     items = []
     for b in audios:
         meta = b.metadata or {}
+        ctype = (b.content_settings.content_type if b.content_settings else "") or ""
+        es_video = (ctype.startswith("video/")
+                    or os.path.basename(b.name).startswith(PREFIJO_CLIP))
         item = {
+            "kind": "video" if es_video else "audio",
             "blobName": b.name,
             "sizeBytes": b.size,
             "createdAt": (meta.get("createdat")
                           or (b.creation_time.isoformat() if b.creation_time else None)),
             "durationMs": int(meta.get("durationms") or 0) or None,
-            "contentType": (b.content_settings.content_type if b.content_settings else None),
-            "audioUrl": _sas_lectura(svc, b.name),
+            "contentType": ctype or None,
+            "url": _sas_lectura(svc, b.name),
+            "audioUrl": _sas_lectura(svc, b.name),   # alias, compatibilidad
             "transcript": None,
         }
         nombre_t = _nombre_transcripcion(b.name)

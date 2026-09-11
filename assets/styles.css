@@ -233,3 +233,17 @@ body.embed .card:first-of-type{border-top:0}
 .exitem .player{margin-bottom:4px}
 .exitem .trh{margin-top:10px}
 .exitem .exTr .ctrls{margin-top:10px}
+
+/* ---------- clip de evidencia ---------- */
+.campo{position:relative;background:#1b1a19;border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;aspect-ratio:16/9;max-height:300px;
+  display:flex;align-items:center;justify-content:center}
+.camprev{width:100%;height:100%;object-fit:contain;background:#1b1a19;display:block}
+.cliptimer{position:absolute;top:8px;right:10px;background:rgba(0,0,0,.6);color:#fff;
+  font:600 13px/1 "Segoe UI",system-ui;font-variant-numeric:tabular-nums;
+  padding:5px 9px;border-radius:var(--r)}
+.campo .dot{top:10px;left:10px}
+#clip .meta{margin-top:10px}
+#clip .meta:empty{display:none}
+.exvideo{width:100%;max-height:280px;border-radius:var(--r-lg);background:#1b1a19;
+  aspect-ratio:auto;border:1px solid var(--line);margin-bottom:6px}

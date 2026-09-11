@@ -68,7 +68,8 @@ def static_files(path):
 def api_sas():
     body = request.get_json(silent=True) or {}
     try:
-        target = core.make_upload_target(body.get("recordId"), body.get("ext", "wav"))
+        target = core.make_upload_target(body.get("recordId"), body.get("ext", "wav"),
+                                         body.get("kind", "audio"))
     except Exception as e:
         return _fail(e)
     app.logger.info("SAS emitido: %s (usuario=%s)", target["blobName"], _principal() or "anonimo")

@@ -100,14 +100,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.isfile(full):
                     continue
                 blob = "grabaciones/%s/%s" % (rid, fn)
+                es_video = fn.startswith("clip-") or fn.endswith((".webm", ".mp4"))
                 item = {
+                    "kind": "video" if es_video else "audio",
                     "blobName": "%s/%s" % (rid, fn),
                     "sizeBytes": os.path.getsize(full),
                     "durationMs": _wav_duration_ms(full),
                     "createdAt": datetime.fromtimestamp(
                         os.path.getmtime(full), timezone.utc).isoformat(),
-                    "contentType": "audio/wav" if fn.endswith(".wav") else None,
+                    "contentType": ("video/webm" if es_video
+                                    else ("audio/wav" if fn.endswith(".wav") else None)),
                     # el emulador no valida SAS: la URL directa sirve para reproducir
+                    "url": "http://localhost:%d/%s" % (PORT, blob),
                     "audioUrl": "http://localhost:%d/%s" % (PORT, blob),
                     "transcript": None,
                 }
@@ -243,8 +247,9 @@ class Handler(BaseHTTPRequestHandler):
                 datos = open(full, "rb").read()
                 self.send_response(200)
                 self._cors()
-                self.send_header("Content-Type", "audio/wav" if ruta.endswith(".wav")
-                                 else "application/octet-stream")
+                tipos = {".wav": "audio/wav", ".webm": "video/webm", ".mp4": "video/mp4"}
+                ext = os.path.splitext(ruta)[1].lower()
+                self.send_header("Content-Type", tipos.get(ext, "application/octet-stream"))
                 self.send_header("Content-Length", str(len(datos)))
                 self.end_headers()
                 self.wfile.write(datos)

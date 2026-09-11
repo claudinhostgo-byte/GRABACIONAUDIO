@@ -28,7 +28,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return _json({"error": "Se esperaba un cuerpo JSON."}, 400)
 
     try:
-        target = core.make_upload_target(body.get("recordId"), body.get("ext", "wav"))
+        target = core.make_upload_target(body.get("recordId"), body.get("ext", "wav"),
+                                         body.get("kind", "audio"))
     except Exception as e:
         status, payload = core.error_response(e)
         return _json(payload, status)
