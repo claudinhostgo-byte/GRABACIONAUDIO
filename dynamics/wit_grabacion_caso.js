@@ -14,10 +14,13 @@
  *
  * Dos detalles que hacen que esto funcione:
  *
- *   a) Dynamics construye el iframe sin el atributo allow="microphone". Un
- *      iframe de otro origen sin ese atributo no puede usar getUserMedia, sin
- *      importar que el usuario acepte el permiso. montar() fija el atributo
- *      ANTES de navegar; asignarlo despues no aplica.
+ *   a) Dynamics construye el iframe sin atributo allow. Un iframe de otro
+ *      origen sin ese atributo no puede usar microfono ni camara, sin importar
+ *      que el usuario acepte el permiso: el atributo se evalua ANTES que el
+ *      permiso. Por eso conceder el permiso en otra ventana no sirve de nada.
+ *      montar() fija el atributo ANTES de navegar; asignarlo despues no aplica.
+ *      Con el atributo puesto, el navegador pide el permiso dentro del propio
+ *      formulario y lo recuerda: una sola vez por usuario y sitio.
  *
  *   b) La pagina no puede escribir en Dataverse (no tiene sesion ni pasaria
  *      CORS). En vez de eso avisa por postMessage y este script escribe con la
@@ -42,6 +45,12 @@ WIT.Grabacion = (function () {
     var TAB_NAME     = "tab_grabacion";
     var CAMPO_NUMERO = "ticketnumber";
     var CAMPO_DESTINO = "description";
+
+    // Permisos que el formulario delega al iframe. Sin esto el navegador
+    // bloquea microfono y camara antes siquiera de preguntarle al usuario:
+    // el atributo se evalua antes que el permiso concedido, de modo que
+    // conceder el permiso en otra ventana no levanta este bloqueo.
+    var ALLOW = "microphone; camera";
 
     var FORM_TYPE_CREATE = 1;
     var MAX_TEXTO = 30000;          // recorte defensivo del texto a escribir
@@ -121,7 +130,7 @@ WIT.Grabacion = (function () {
     }
 
     /**
-     * Fija allow="microphone" y recarga el iframe para que aplique.
+     * Fija el atributo allow y recarga el iframe para que aplique.
      * Reintenta con espera creciente: la UCI puede renderizar el iframe
      * despues del OnLoad, o re-renderizarlo borrando el atributo.
      */
@@ -130,24 +139,24 @@ WIT.Grabacion = (function () {
         var el = buscarIframe(destino);
 
         if (el) {
-            if (el.getAttribute("allow") === "microphone") {
+            if (el.getAttribute("allow") === ALLOW) {
                 return true;                      // ya estaba, nada que hacer
             }
-            el.setAttribute("allow", "microphone");
+            el.setAttribute("allow", ALLOW);
             // el atributo solo aplica en una navegacion nueva
             el.setAttribute("src", "about:blank");
             setTimeout(function () {
                 try { el.setAttribute("src", destino); } catch (e) {}
             }, 60);
-            console.log("WIT.Grabacion: allow=microphone aplicado (intento " + intento + ")");
+            console.log("WIT.Grabacion: allow=\"" + ALLOW + "\" aplicado (intento " + intento + ")");
             return true;
         }
 
         if (intento < 6) {
             setTimeout(function () { aplicarAllow(destino, intento + 1); }, 300 * (intento + 1));
         } else {
-            console.warn("WIT.Grabacion: no se encontro el iframe; el microfono " +
-                         "quedara bloqueado y la pagina ofrecera abrirse aparte.");
+            console.warn("WIT.Grabacion: no se encontro el iframe; microfono y camara " +
+                         "quedaran bloqueados y la pagina ofrecera abrirse aparte.");
         }
         return false;
     }

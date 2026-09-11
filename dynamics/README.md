@@ -17,11 +17,24 @@ https://proud-smoke-0ef172d03.5.azurestaticapps.net/?id=<ticketnumber>&lock=1
 en `grabaciones/<número de caso>/<fecha>-<aleatorio>.wav`, y la metadata del blob repite el
 número en `recordid`.
 
-## El problema del micrófono, y cómo se resuelve
+## El problema del micrófono y la cámara, y cómo se resuelve
 
-Dynamics construye el `iframe` **sin el atributo `allow="microphone"`**. Un iframe de otro origen
-sin ese atributo no puede usar `getUserMedia`, sin importar que el usuario acepte el permiso: el
+Dynamics construye el `iframe` **sin atributo `allow`**. Un iframe de otro origen sin ese
+atributo no puede usar micrófono ni cámara, sin importar que el usuario acepte el permiso: el
 navegador lo bloquea antes de preguntar.
+
+Son **dos permisos independientes**, y se evalúan en este orden:
+
+| | Quién lo controla |
+|---|---|
+| Permissions Policy: el atributo `allow` del iframe | este recurso web |
+| Permiso del usuario: el diálogo *Permitir / Bloquear* | el usuario, por sitio |
+
+El atributo se evalúa **antes** que el permiso del usuario. De ahí que conceder el permiso en
+otra ventana no sirva de nada: la ventana resuelve el segundo, y el que bloquea es el primero.
+
+Con el atributo puesto, el navegador pide el permiso **dentro del propio formulario**, una sola
+vez por usuario y sitio, y lo recuerda. El script delega ambos: `allow="microphone; camera"`.
 
 Verificado: la lista de permitidos del documento padre para `microphone` contiene únicamente su
 propio origen. El iframe del grabador no está en ella salvo que se declare explícitamente.
