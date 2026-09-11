@@ -86,21 +86,33 @@ function setMsg(el, text, kind){
   el.textContent = text || '';
   el.className = 'msg' + (kind ? ' ' + kind : '');
 }
+/** Enlace que reabre esta misma página como pestaña de primer nivel, donde el
+ *  navegador sí concede micrófono y cámara. Es la salida cuando el contenedor
+ *  no delega los permisos. */
+function enlaceEscape(etiqueta){
+  const a = document.createElement('a');
+  a.className = 'banner-act';
+  a.href = location.href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = etiqueta || 'Abrir en pestaña nueva';
+  return a;
+}
+
 /** banner de aviso; con accion opcional que abre esta misma pagina de primer nivel */
 function banner(text, conAccion){
   const b = $('banner');
   if (!text) { b.classList.add('hidden'); return; }
   b.textContent = text;
-  if (conAccion){
-    const a = document.createElement('a');
-    a.className = 'banner-act';
-    a.href = location.href;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = 'Abrir en pestaña nueva';
-    b.appendChild(a);
-  }
+  if (conAccion) b.appendChild(enlaceEscape());
   b.classList.remove('hidden');
+}
+
+/** Mensaje con enlace de escape, para avisos dentro de una sección. */
+function msgConEscape(el, texto, etiqueta){
+  el.textContent = texto;
+  el.className = 'msg bad';
+  el.appendChild(enlaceEscape(etiqueta));
 }
 
 /* ---------- deteccion de incrustacion (Dynamics) ---------- */
@@ -123,6 +135,18 @@ function marcoBloqueaMic(){
 
 const AVISO_MARCO = 'La página está incrustada y el contenedor no le delegó el micrófono ' +
   '(falta allow="microphone" en el iframe). Ábrela en una pestaña nueva para grabar.';
+
+/** ¿El marco nos delegó la cámara? Mismo mecanismo que el micrófono. */
+function marcoBloqueaCam(){
+  try {
+    const fp = document.featurePolicy;
+    if (fp && typeof fp.allowsFeature === 'function') return !fp.allowsFeature('camera');
+  } catch (e) {}
+  return null;
+}
+
+const AVISO_CAM = 'El contenedor no le delegó la cámara: en Dynamics el iframe necesita ' +
+  'allow="microphone; camera". Abra la página aparte para grabar el clip.';
 
 /**
  * Origen del contenedor al que se le puede devolver la transcripción.
@@ -510,8 +534,7 @@ async function permitirCamara(){
     await previsualizar();
   } catch (e){
     if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
-      setMsg($('clipMsg'), 'El contenedor no delegó la cámara. En Dynamics el iframe ' +
-        'necesita allow="microphone; camera". Ábrela en pestaña nueva para grabar el clip.', 'bad');
+      msgConEscape($('clipMsg'), AVISO_CAM, 'Abrir aparte y dar permiso');
     } else {
       setMsg($('clipMsg'), 'No se pudo acceder a la cámara: ' + e.name, 'bad');
     }
@@ -546,6 +569,7 @@ async function previsualizar(){
       video: devId ? { deviceId: { exact: devId } } : true,
       audio: { echoCancellation: true, noiseSuppression: true }
     });
+    $('camHint').classList.add('hidden');
     const v = $('camPrev');
     v.controls = false;
     v.srcObject = S.cam.stream;
@@ -1323,6 +1347,11 @@ function init(){
   } else if (EN_IFRAME && marcoBloqueaMic() === true){
     // se avisa antes de que el usuario pierda tiempo intentando grabar
     banner(AVISO_MARCO, true);
+  }
+
+  if (EN_IFRAME && marcoBloqueaCam() === true){
+    msgConEscape($('clipMsg'), AVISO_CAM, 'Abrir aparte y dar permiso');
+    $('camHint').textContent = 'Cámara bloqueada por el contenedor.';
   }
 
   // ?id=XXX prellena el ID y &lock=1 lo fija (útil al abrir desde Dynamics)
