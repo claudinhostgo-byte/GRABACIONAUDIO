@@ -291,3 +291,13 @@ body.solo-permiso #historial,
 body.solo-permiso .ftr{display:none !important}
 body.solo-permiso .shell{max-width:none;padding:12px}
 body.solo-permiso .card{margin-bottom:0;box-shadow:none}
+
+/* diagnostico de permisos de camara */
+.diag{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-lg);
+  background:var(--hover);padding:10px 12px;font-size:12px;color:var(--ink)}
+.diag h4{margin:0 0 6px;font-size:12px;font-weight:600}
+.diag ul{margin:0;padding-left:18px}
+.diag li{margin-bottom:3px}
+.diag .si{color:var(--ok);font-weight:600}
+.diag .no{color:var(--rec);font-weight:600}
+.diag .veredicto{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}

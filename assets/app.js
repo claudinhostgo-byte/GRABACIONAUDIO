@@ -544,7 +544,8 @@ async function permitirCamara(){
     await previsualizar();
   } catch (e){
     if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
-      msgConEscape($('clipMsg'), AVISO_CAM, 'Abrir aparte y dar permiso');
+      setMsg($('clipMsg'), 'No se pudo usar la cámara (' + e.name + ').', 'bad');
+      pintarDiagnosticoCam();
     } else {
       setMsg($('clipMsg'), 'No se pudo acceder a la cámara: ' + e.name, 'bad');
     }
@@ -781,8 +782,58 @@ function escucharVentanaPermiso(){
     const d = ev.data;
     if (!d || d.tipo !== 'wit-permiso-ok') return;
     setMsg($('clipMsg'), 'Cámara autorizada. Reintentando aquí…');
-    permitirCamara();
+    permitirCamara().then(pintarDiagnosticoCam);
   });
+}
+
+/**
+ * Muestra el estado real de los dos controles que deciden si la cámara sirve
+ * aquí, para no tener que adivinar cuál de los dos está cerrando el paso.
+ */
+async function pintarDiagnosticoCam(){
+  const caja = $('camDiag');
+  const delegada = document.featurePolicy && document.featurePolicy.allowsFeature
+    ? document.featurePolicy.allowsFeature('camera') : null;
+
+  let permiso = 'desconocido';
+  try {
+    if (navigator.permissions && navigator.permissions.query){
+      permiso = (await navigator.permissions.query({ name: 'camera' })).state;
+    }
+  } catch (e) { /* Firefox no expone 'camera' en permissions */ }
+
+  const si = (v) => v === true  ? '<span class="si">sí</span>'
+           : v === false ? '<span class="no">no</span>' : '<span>no se pudo determinar</span>';
+
+  const estadoPermiso = permiso === 'granted' ? '<span class="si">concedido</span>'
+                      : permiso === 'denied'  ? '<span class="no">denegado</span>'
+                      : permiso === 'prompt'  ? 'aún no preguntado'
+                      : permiso;
+
+  let veredicto;
+  if (delegada === false){
+    veredicto = '<b>El bloqueo está en el contenedor, no en su autorización.</b> ' +
+      'El iframe de Dynamics no declara <code>camera</code> en su atributo ' +
+      '<code>allow</code>, y ese control se evalúa antes que el permiso del usuario. ' +
+      'Autorizar de nuevo no va a cambiar esto: hay que corregir el recurso web ' +
+      '(<code>allow="microphone; camera"</code>).';
+  } else if (permiso === 'denied'){
+    veredicto = 'El contenedor sí delega la cámara, pero el permiso está denegado para este ' +
+      'sitio. Use «Autorizar cámara», o restablezca el permiso desde el candado de la barra ' +
+      'de direcciones.';
+  } else if (delegada === true){
+    veredicto = 'Ambos controles están en orden: use «Permitir cámara» para comenzar.';
+  } else {
+    veredicto = 'No se pudo determinar el estado del contenedor en este navegador.';
+  }
+
+  caja.innerHTML =
+    '<h4>Diagnóstico de la cámara</h4><ul>' +
+    '<li>El contenedor delega la cámara a esta página: ' + si(delegada) + '</li>' +
+    '<li>Permiso del usuario para este sitio: ' + estadoPermiso + '</li>' +
+    '<li>Página incrustada en otro sitio: ' + si(EN_IFRAME) + '</li>' +
+    '</ul><div class="veredicto">' + veredicto + '</div>';
+  caja.classList.remove('hidden');
 }
 
 /** Pide el permiso en la ventana de autorización y avisa a quien la abrió. */
@@ -1438,6 +1489,7 @@ function init(){
     $('btnCam').classList.add('hidden');
     $('btnCamVentana').classList.remove('hidden');
     escucharVentanaPermiso();
+    pintarDiagnosticoCam();
   }
 
   // ?id=XXX prellena el ID y &lock=1 lo fija (útil al abrir desde Dynamics)
