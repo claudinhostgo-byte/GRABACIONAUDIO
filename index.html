@@ -201,6 +201,7 @@
     <div class="step-hd"><span class="num">&#9679;</span><h2>Clip de evidencia (opcional)</h2>
       <span id="sClipState" class="pill">Bloqueado</span></div>
     <div class="step-bd">
+      <div id="clipIdInfo"></div>
       <p class="hint">Video corto para dejar constancia de algo físico: un equipo, un daño, una
         instalación. Se guarda junto al audio, bajo el mismo número de caso. No se transcribe.</p>
 
@@ -218,6 +219,7 @@
           </select>
         </div>
         <button id="btnCam" class="ghost" type="button">Permitir cámara</button>
+        <button id="btnCamVentana" class="primary hidden" type="button">Grabar en ventana aparte</button>
       </div>
 
       <div class="campo">
@@ -239,11 +241,14 @@
       <div class="meta" id="clipMeta"></div>
       <div id="clipProgWrap" class="prog hidden"><div id="clipProgBar" class="bar"></div><span id="clipProgTxt">0%</span></div>
       <div id="clipMsg" class="msg"></div>
+      <div class="ctrls solo-only">
+        <button id="btnCerrarVentana" class="ghost" type="button">Cerrar ventana</button>
+      </div>
     </div>
   </section>
 
   <!-- ===== Historial ===== -->
-  <section class="card">
+  <section class="card" id="historial">
     <h2>Grabaciones subidas en esta sesión</h2>
     <table class="tbl">
       <thead><tr><th>ID</th><th>Blob</th><th>Duración</th><th>Fecha</th><th></th></tr></thead>

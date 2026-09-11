@@ -251,3 +251,27 @@ body.embed .card:first-of-type{border-top:0}
 .camhint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   color:#c8c6c4;font-size:12.5px;text-align:center;padding:0 16px;pointer-events:none}
 .msg .banner-act{margin-left:8px}
+
+/* ============================================================
+   Ventana compacta: la misma pagina con ?solo=clip, abierta como
+   ventana pequena para conceder el permiso y grabar el clip sin
+   sacar al usuario del formulario.
+   ============================================================ */
+.solo-only{display:none}
+body.solo-clip .solo-only{display:flex}
+body.solo-clip .hdr,
+body.solo-clip #cfgPanel,
+body.solo-clip #step1,
+body.solo-clip #existentes,
+body.solo-clip #step2,
+body.solo-clip #step3,
+body.solo-clip #step4,
+body.solo-clip #historial,
+body.solo-clip .ftr{display:none !important}
+body.solo-clip .shell{max-width:none;padding:10px 12px 16px}
+body.solo-clip .card{margin-bottom:0;box-shadow:none;padding:12px 14px}
+body.solo-clip #clip .hint{margin-bottom:8px}
+body.solo-clip .campo{max-height:220px}
+body.solo-clip .step-hd .num{display:none}
+body.solo-clip #clipIdInfo{display:block}
+#clipIdInfo{display:none;font-size:12px;color:var(--ink2);margin-bottom:8px}

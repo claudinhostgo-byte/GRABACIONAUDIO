@@ -115,6 +115,9 @@ function msgConEscape(el, texto, etiqueta){
   el.appendChild(enlaceEscape(etiqueta));
 }
 
+/** Modo ventana compacta: la misma pagina mostrando solo el clip. */
+const SOLO_CLIP = new URLSearchParams(location.search).get('solo') === 'clip';
+
 /* ---------- deteccion de incrustacion (Dynamics) ---------- */
 const EN_IFRAME = (() => {
   try { return window.self !== window.top; } catch (e) { return true; }
@@ -251,8 +254,13 @@ function confirmId(){
   $('s1state').className = 'pill ok';
   refreshUploadBtn();
   // el paso 2 se habilita solo si no hay una grabación previa para este ID
-  bloquearGrabacion();
   habilitarClip();
+  if (SOLO_CLIP){
+    // la ventana compacta solo graba el clip: no consulta ni bloquea nada
+    $('clipIdInfo').textContent = 'Caso: ' + clean;
+    return;
+  }
+  bloquearGrabacion();
   buscarExistentes();
 }
 function editId(){
@@ -731,10 +739,50 @@ async function subirClip(){
 
     setMsg($('clipMsg'), 'Clip subido: ' + t.blobName, 'ok');
     $('sClipState').textContent = 'Subido'; $('sClipState').className = 'pill ok';
+    if (SOLO_CLIP && window.opener && !window.opener.closed){
+      try {
+        window.opener.postMessage({ tipo: 'wit-clip-listo', recordId: S.id,
+                                    blobName: t.blobName }, location.origin);
+      } catch (e) { console.warn('No se pudo avisar a la ventana de origen', e); }
+    }
   } catch (e){
     setMsg($('clipMsg'), 'Error al subir el clip: ' + e.message, 'bad');
     $('btnClipUp').disabled = false;
   }
+}
+
+/**
+ * Abre la misma pagina en modo compacto, como ventana propia. Al ser una
+ * ventana de primer nivel el navegador si concede la camara, y al conservar
+ * window.opener puede avisar de vuelta cuando el clip quede subido.
+ */
+function abrirVentanaClip(){
+  const u = new URL(location.href);
+  u.searchParams.set('id', S.id);
+  u.searchParams.set('lock', '1');
+  u.searchParams.set('solo', 'clip');
+  u.searchParams.delete('parent');
+  const w = window.open(u.toString(), 'wit_clip_' + S.id,
+                        'width=560,height=720,menubar=no,toolbar=no,location=no');
+  if (!w){
+    setMsg($('clipMsg'), 'El navegador bloqueó la ventana emergente. ' +
+      'Permita las ventanas emergentes para este sitio.', 'bad');
+    return;
+  }
+  setMsg($('clipMsg'), 'Grabe el clip en la ventana que se abrió. ' +
+    'Al terminar, esta vista se actualiza sola.');
+  w.focus();
+}
+
+/** Aviso desde la ventana compacta cuando el clip ya quedo subido. */
+function escucharVentanaClip(){
+  window.addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin) return;
+    const d = ev.data;
+    if (!d || d.tipo !== 'wit-clip-listo') return;
+    setMsg($('clipMsg'), 'Clip subido desde la ventana aparte: ' + d.blobName, 'ok');
+    if (S.id) buscarExistentes();
+  });
 }
 
 function habilitarClip(){
@@ -1349,9 +1397,20 @@ function init(){
     banner(AVISO_MARCO, true);
   }
 
+  if (SOLO_CLIP){
+    document.body.classList.add('solo-clip');
+    document.title = 'Clip de evidencia';
+  }
+
+  // dentro de un marco sin cámara delegada, la ventana aparte es el camino:
+  // conserva el número de caso y avisa de vuelta al terminar
   if (EN_IFRAME && marcoBloqueaCam() === true){
-    msgConEscape($('clipMsg'), AVISO_CAM, 'Abrir aparte y dar permiso');
+    setMsg($('clipMsg'), 'El contenedor no delegó la cámara. Grabe el clip en una ' +
+      'ventana aparte: al terminar vuelve solo a este caso.', 'bad');
     $('camHint').textContent = 'Cámara bloqueada por el contenedor.';
+    $('btnCam').classList.add('hidden');
+    $('btnCamVentana').classList.remove('hidden');
+    escucharVentanaClip();
   }
 
   // ?id=XXX prellena el ID y &lock=1 lo fija (útil al abrir desde Dynamics)
@@ -1387,7 +1446,9 @@ function init(){
     setMsg($('buscaMsg'), 'Grabación habilitada manualmente: se agregará otra grabación a este ID.');
   };
 
-  $('btnCam').onclick      = permitirCamara;
+  $('btnCam').onclick        = permitirCamara;
+  $('btnCamVentana').onclick = abrirVentanaClip;
+  $('btnCerrarVentana').onclick = () => { detenerCamara(); window.close(); };
   $('camSel').onchange     = previsualizar;
   $('btnClipRec').onclick  = grabarClip;
   $('btnClipStop').onclick = detenerClip;
