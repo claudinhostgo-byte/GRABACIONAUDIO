@@ -115,6 +115,9 @@ function msgConEscape(el, texto, etiqueta){
   el.appendChild(enlaceEscape(etiqueta));
 }
 
+/** Interfaz simplificada: una sola pantalla, todo automatico al detener. */
+const MODO_SIMPLE = new URLSearchParams(location.search).get('modo') === 'simple';
+
 /** Modos compactos de la misma pagina, abiertos como ventana propia. */
 const SOLO = new URLSearchParams(location.search).get('solo');
 const SOLO_CLIP    = SOLO === 'clip';
@@ -254,6 +257,10 @@ function confirmId(){
   $('btnIdEdit').classList.remove('hidden');
   $('s1state').textContent = 'ID: ' + clean;
   $('s1state').className = 'pill ok';
+  if (MODO_SIMPLE){
+    $('simpleCaso').textContent = clean;
+    $('simpleCaso').className = 'pill ok';
+  }
   refreshUploadBtn();
   // el paso 2 se habilita solo si no hay una grabación previa para este ID
   habilitarClip();
@@ -316,6 +323,11 @@ async function buscarExistentes(){
     catch (e){ throw new Error('respuesta no JSON: ' + txt.slice(0, 150)); }
     if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
 
+    if (MODO_SIMPLE){
+      simpleMostrarPrevia(d);
+      desbloquearGrabacion();
+      return;
+    }
     if (d.count > 0){
       renderExistentes(d);
       return;
@@ -1030,7 +1042,11 @@ async function startRec(){
 function elapsed(){
   return S.accMs + (S.rec && S.rec.state === 'recording' ? performance.now() - S.t0 : 0);
 }
-function updTimer(){ $('timer').textContent = fmtTime(elapsed()); }
+function updTimer(){
+  const t = fmtTime(elapsed());
+  $('timer').textContent = t;
+  if (MODO_SIMPLE) $('simpleTimer').textContent = t;
+}
 
 function togglePause(){
   if (!S.rec) return;
@@ -1102,6 +1118,8 @@ async function onStopped(){
   setMsg($('upMsg'), '');
   $('progWrap').classList.add('hidden');
   refreshUploadBtn();
+
+  if (MODO_SIMPLE) continuarSimple();
 }
 
 /* ---------- conversión a WAV PCM 16 kHz mono ---------- */
@@ -1441,6 +1459,146 @@ function resetTake(){
   $('btnTr').disabled = true;
   resetTr();
 }
+
+/* ---------- Interfaz simplificada ---------- */
+
+function simpleEstado(texto, ocupado){
+  $('simpleEstado').textContent = texto;
+  $('simpleProg').classList.toggle('hidden', !ocupado);
+}
+
+function simpleError(texto){
+  setMsg($('simpleErr'), texto, 'bad');
+  simpleEstado('Se detuvo por un error', false);
+  $('simpleRec').disabled = false;
+  $('simpleStop').disabled = true;
+}
+
+/** Cuántas personas hablan -> configuración de diarización. */
+function simpleDiarize(){
+  const n = Number($('simplePers').value) || 1;
+  return n > 1 ? String(n) : '0';
+}
+
+async function simpleGrabar(){
+  setMsg($('simpleErr'), '');
+  $('simpleOut').classList.add('hidden');
+  S.cfg.diarize = simpleDiarize();
+
+  // el permiso se pide en el primer intento, no antes
+  if ($('micSel').disabled || !$('micSel').value){
+    simpleEstado('Solicitando acceso al micrófono…', true);
+    await askPermission();
+    if ($('micSel').disabled || !$('micSel').value){
+      simpleError('No se pudo acceder al micrófono. Revise el permiso del navegador.');
+      return;
+    }
+  }
+
+  simpleEstado('Grabando…', false);
+  $('simpleDot').classList.remove('hidden');
+  $('simpleRec').disabled = true;
+  $('simpleStop').disabled = false;
+  $('simplePers').disabled = true;
+  await startRec();
+}
+
+function simpleDetener(){
+  $('simpleStop').disabled = true;
+  $('simpleDot').classList.add('hidden');
+  simpleEstado('Procesando el audio…', true);
+  stopRec();                       // al terminar dispara continuarSimple()
+}
+
+/** Encadena subida y transcripción sin intervención del usuario. */
+async function continuarSimple(){
+  $('simplePers').disabled = false;
+
+  if (!cfgReady()){
+    simpleError('Falta configurar el destino en Azure.');
+    return;
+  }
+
+  simpleEstado('Guardando la grabación…', true);
+  await upload();
+  if (!S.uploaded){
+    simpleError($('upMsg').textContent || 'No se pudo guardar la grabación.');
+    return;
+  }
+
+  simpleEstado('Transcribiendo con Azure AI Speech…', true);
+  await transcribe();
+  if (!S.tr){
+    simpleError($('trMsg').textContent || 'No se pudo transcribir.');
+    return;
+  }
+
+  simpleEstado('Listo', false);
+  $('simpleRec').disabled = false;
+  renderSimple(S.tr);
+}
+
+/** Muestra la transcripción separada por hablante. */
+function renderSimple(t){
+  $('simpleAviso').classList.toggle('hidden', !t.mock);
+  if (t.mock){
+    $('simpleAviso').textContent = 'Transcripción simulada: no proviene de Azure AI Speech.';
+  }
+
+  const hablantes = new Set((t.phrases || []).map((p) => p.speaker).filter((x) => x != null));
+  $('simpleStats').innerHTML = '';
+  const sp = document.createElement('span');
+  sp.textContent = [
+    String(t.text).split(/\s+/).filter(Boolean).length + ' palabras',
+    hablantes.size ? hablantes.size + ' hablantes identificados' : 'sin separación de hablantes',
+    (t.phrases || []).length + ' segmentos'
+  ].join(' · ');
+  $('simpleStats').appendChild(sp);
+
+  const ol = $('simpleSegs');
+  ol.innerHTML = '';
+
+  const frases = t.phrases || [];
+  if (!frases.length){
+    const li = document.createElement('li');
+    const tx = document.createElement('span');
+    tx.className = 'txt'; tx.textContent = t.text;
+    li.appendChild(tx); ol.appendChild(li);
+  } else {
+    frases.forEach((p) => {
+      const li = document.createElement('li');
+
+      const ts = document.createElement('span');
+      ts.className = 'ts'; ts.textContent = fmtTime(p.offsetMs);
+      li.appendChild(ts);
+
+      if (p.speaker != null){
+        const chip = document.createElement('span');
+        chip.className = 'spk s' + ((Number(p.speaker) - 1) % 4 + 1);
+        chip.textContent = 'Hablante ' + p.speaker;
+        li.appendChild(chip);
+      }
+
+      const tx = document.createElement('span');
+      tx.className = 'txt'; tx.textContent = p.text;
+      li.appendChild(tx);
+
+      ol.appendChild(li);
+    });
+  }
+
+  $('simpleOut').classList.remove('hidden');
+}
+
+/** Al abrir el caso, si ya hay transcripción guardada se muestra de una vez. */
+function simpleMostrarPrevia(d){
+  const conTexto = (d.items || []).find((it) => !esClip(it) && it.transcript && it.transcript.text);
+  if (!conTexto) return;
+  const t = conTexto.transcript;
+  // lo almacenado trae offsetMilliseconds; la UI trabaja con la forma normalizada
+  renderSimple({ text: t.text, phrases: normalizePhrases(t), mock: !!t.mock });
+  simpleEstado('Ya existe una grabación para este caso', false);
+}
 function download(){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(S.blob);
@@ -1478,6 +1636,10 @@ function init(){
   if (SOLO_PERMISO){
     document.body.classList.add('solo-permiso');
     document.title = 'Autorizar cámara';
+  }
+  if (MODO_SIMPLE){
+    document.body.classList.add('modo-simple');
+    document.title = 'Grabación';
   }
 
   // dentro de un marco sin cámara delegada, la ventana aparte es el camino:
@@ -1526,6 +1688,19 @@ function init(){
   };
 
   $('btnCam').onclick        = permitirCamara;
+  $('simpleRec').onclick    = simpleGrabar;
+  $('simpleStop').onclick   = simpleDetener;
+  $('simpleCopiar').onclick = () => navigator.clipboard.writeText(S.tr.text)
+    .then(() => { $('simpleCopiar').textContent = 'Copiado'; });
+  $('simpleOtra').onclick   = () => {
+    resetTake();
+    $('simpleOut').classList.add('hidden');
+    setMsg($('simpleErr'), '');
+    $('simpleTimer').textContent = '00:00';
+    simpleEstado('Listo para grabar', false);
+    $('simpleRec').disabled = false;
+  };
+
   $('btnCamVentana').onclick = abrirVentanaPermiso;
   $('btnPermitirAqui').onclick  = permitirAqui;
   $('btnCerrarPermiso').onclick = () => window.close();

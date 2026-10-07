@@ -196,6 +196,51 @@
     </div>
   </section>
 
+  <!-- ===== Grabación simple (?modo=simple) ===== -->
+  <section class="card" id="simple">
+    <div class="simple-hd">
+      <h2>Grabación de la conversación</h2>
+      <span id="simpleCaso" class="pill"></span>
+    </div>
+
+    <div class="simple-pers">
+      <label for="simplePers">¿Cuántas personas hablan?</label>
+      <select id="simplePers">
+        <option value="1">1 persona</option>
+        <option value="2" selected>2 personas</option>
+        <option value="3">3 personas</option>
+        <option value="4">4 personas</option>
+      </select>
+    </div>
+
+    <div class="simple-rec">
+      <div id="simpleDot" class="dot hidden"></div>
+      <div id="simpleTimer" class="simple-timer">00:00</div>
+      <div id="simpleEstado" class="simple-estado">Listo para grabar</div>
+      <div id="simpleProg" class="simple-prog hidden"><div class="spin"></div></div>
+    </div>
+
+    <div class="ctrls simple-ctrls">
+      <button id="simpleRec" class="rec" type="button">
+        <span class="ico">&#9679;</span><span class="lbl">Grabar</span>
+      </button>
+      <button id="simpleStop" class="ghost" type="button" disabled>Detener</button>
+    </div>
+
+    <div id="simpleErr" class="msg"></div>
+
+    <div id="simpleOut" class="hidden">
+      <h3 class="trh">Transcripción</h3>
+      <div id="simpleAviso" class="banner mock hidden"></div>
+      <div id="simpleStats" class="trmeta"></div>
+      <ol id="simpleSegs" class="trsegs"></ol>
+      <div class="ctrls">
+        <button id="simpleCopiar" class="ghost small" type="button">Copiar texto</button>
+        <button id="simpleOtra" class="ghost small" type="button">Grabar otra vez</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== Autorización de cámara (ventana aparte) ===== -->
   <section class="card" id="permiso">
     <h2>Autorizar cámara</h2>

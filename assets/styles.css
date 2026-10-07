@@ -301,3 +301,49 @@ body.solo-permiso .card{margin-bottom:0;box-shadow:none}
 .diag .si{color:var(--ok);font-weight:600}
 .diag .no{color:var(--rec);font-weight:600}
 .diag .veredicto{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+
+/* ============================================================
+   Grabación simple (?modo=simple): una sola pantalla, sin pasos.
+   Elegir cuántos hablan, grabar, detener; al detener sube y
+   transcribe solo, y muestra el texto por hablante.
+   ============================================================ */
+#simple{display:none}
+body.modo-simple #simple{display:block}
+body.modo-simple .hdr,
+body.modo-simple #cfgPanel,
+body.modo-simple #banner,
+body.modo-simple #step1,
+body.modo-simple #existentes,
+body.modo-simple #step2,
+body.modo-simple #step3,
+body.modo-simple #step4,
+body.modo-simple #clip,
+body.modo-simple #permiso,
+body.modo-simple #historial,
+body.modo-simple .ftr{display:none !important}
+body.modo-simple .shell{max-width:720px;padding:12px}
+body.modo-simple .card{margin-bottom:0}
+
+.simple-hd{display:flex;align-items:center;gap:10px;padding-bottom:8px;
+  border-bottom:1px solid var(--line);margin-bottom:14px}
+.simple-hd .pill{margin-left:auto}
+
+.simple-pers{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.simple-pers label{font-weight:600;font-size:13px;white-space:nowrap}
+.simple-pers select{max-width:200px}
+
+.simple-rec{position:relative;background:var(--viz-bg);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:22px 16px;text-align:center}
+.simple-timer{font:600 40px/1 "Segoe UI",system-ui;font-variant-numeric:tabular-nums;
+  color:var(--viz-ink);letter-spacing:1px}
+.simple-estado{margin-top:6px;font-size:13px;color:var(--ink2)}
+.simple-prog{margin-top:10px}
+.simple-rec .dot{top:12px;left:12px}
+
+.simple-ctrls{justify-content:center}
+.simple-ctrls .rec{min-width:150px;height:40px;font-size:14px}
+.simple-ctrls .ghost{min-width:110px;height:40px}
+
+#simpleOut .trsegs{max-height:none}
+#simpleOut .trsegs li{cursor:default}
+#simpleOut .trsegs li:hover{background:none}

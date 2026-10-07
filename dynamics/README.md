@@ -75,7 +75,23 @@ que forme parte del formulario.
 
 Es el error más común al montar esto: todo parece bien configurado y la pestaña nunca aparece.
 
-### 3. Pestaña e iframe
+### 3. Pestañas e iframes
+
+El script soporta **dos pestañas**, ambas opcionales por separado:
+
+| Pestaña | Control IFRAME | Interfaz |
+|---|---|---|
+| `tab_grabacion` | `IFRAME_grabador` | completa: pasos, clip de evidencia, configuración |
+| `tab_grabacion_simple` | `IFRAME_grabador_simple` | simplificada: cuántos hablan, grabar, detener |
+
+La simplificada carga la misma página con `&modo=simple`: al detener sube y transcribe sola, y
+muestra el texto separado por hablante. Si solo se crea una de las dos, la otra se ignora sin
+error.
+
+Repetir los pasos de abajo para cada pestaña que se quiera, cambiando nombre de pestaña y de
+control según la tabla.
+
+
 
 Editar el formulario **principal** de la tabla *Caso*:
 

@@ -1,8 +1,10 @@
 /*
  * Recurso web JavaScript para el formulario de Caso (incident).
  *
- * 1. Muestra el grabador en una pestana del formulario, pasandole el numero de
- *    caso como parametro de indexacion.
+ * 1. Muestra el grabador en una o dos pestanas del formulario, pasandole el
+ *    numero de caso como parametro de indexacion:
+ *      - tab_grabacion        -> interfaz completa
+ *      - tab_grabacion_simple -> interfaz simplificada (?modo=simple), opcional
  * 2. Recibe la transcripcion de vuelta y la agrega a la Descripcion del caso.
  *
  * Reglas de negocio:
@@ -41,8 +43,14 @@ WIT.Grabacion = (function () {
 
     // ---- configuracion -----------------------------------------------------
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
+    // Pestana completa: todos los pasos, clip de evidencia y configuracion.
     var IFRAME_NAME  = "IFRAME_grabador";
     var TAB_NAME     = "tab_grabacion";
+
+    // Pestana simplificada: cuantas personas hablan, grabar y detener. Al
+    // detener sube y transcribe sola, y muestra el texto por hablante.
+    var IFRAME_SIMPLE = "IFRAME_grabador_simple";
+    var TAB_SIMPLE    = "tab_grabacion_simple";
     var CAMPO_NUMERO = "ticketnumber";
     var CAMPO_DESTINO = "description";
 
@@ -69,13 +77,14 @@ WIT.Grabacion = (function () {
         return String(valor).trim() || null;
     }
 
-    function urlGrabador(numeroCaso) {
+    function urlGrabador(numeroCaso, simple) {
         return BASE_URL + "/?id=" + encodeURIComponent(numeroCaso) +
-               "&lock=1&parent=" + encodeURIComponent(window.location.origin);
+               "&lock=1&parent=" + encodeURIComponent(window.location.origin) +
+               (simple ? "&modo=simple" : "");
     }
 
-    function obtenerTab(formContext) {
-        try { return formContext.ui.tabs.get(TAB_NAME); } catch (e) { return null; }
+    function obtenerTab(formContext, nombre) {
+        try { return formContext.ui.tabs.get(nombre || TAB_NAME); } catch (e) { return null; }
     }
 
     function aviso(mensaje, nivel) {
@@ -103,9 +112,10 @@ WIT.Grabacion = (function () {
      * getObject() devuelva el iframe, ni que este en el DOM cuando corre
      * OnLoad, asi que hay un segundo camino por src.
      */
-    function buscarIframe(destino) {
+    function buscarIframe(destino, nombreControl) {
+        var nombre = nombreControl || IFRAME_NAME;
         try {
-            var c = _formContext.getControl(IFRAME_NAME);
+            var c = _formContext.getControl(nombre);
             if (c && c.getObject) {
                 var o = c.getObject();
                 if (o) {
@@ -122,7 +132,7 @@ WIT.Grabacion = (function () {
         for (var i = 0; i < todos.length; i++) {
             var src = todos[i].getAttribute("src") || "";
             var id = todos[i].getAttribute("id") || "";
-            if (src.indexOf(BASE_URL) === 0 || id.indexOf(IFRAME_NAME) !== -1) {
+            if (src === destino || id.indexOf(nombre) !== -1) {
                 return todos[i];
             }
         }
@@ -134,9 +144,9 @@ WIT.Grabacion = (function () {
      * Reintenta con espera creciente: la UCI puede renderizar el iframe
      * despues del OnLoad, o re-renderizarlo borrando el atributo.
      */
-    function aplicarAllow(destino, intento) {
+    function aplicarAllow(destino, intento, nombreControl) {
         intento = intento || 0;
-        var el = buscarIframe(destino);
+        var el = buscarIframe(destino, nombreControl);
 
         if (el) {
             if (el.getAttribute("allow") === ALLOW) {
@@ -153,7 +163,9 @@ WIT.Grabacion = (function () {
         }
 
         if (intento < 6) {
-            setTimeout(function () { aplicarAllow(destino, intento + 1); }, 300 * (intento + 1));
+            setTimeout(function () {
+                aplicarAllow(destino, intento + 1, nombreControl);
+            }, 300 * (intento + 1));
         } else {
             console.warn("WIT.Grabacion: no se encontro el iframe; microfono y camara " +
                          "quedaran bloqueados y la pagina ofrecera abrirse aparte.");
@@ -161,14 +173,17 @@ WIT.Grabacion = (function () {
         return false;
     }
 
-    function montar(formContext, numeroCaso) {
-        var control = formContext.getControl(IFRAME_NAME);
+    function montar(formContext, numeroCaso, nombreControl, simple) {
+        var nombre = nombreControl || IFRAME_NAME;
+        var control = formContext.getControl(nombre);
         if (!control) {
-            console.warn("WIT.Grabacion: no existe el control " + IFRAME_NAME);
+            // la pestana simplificada es opcional: si no esta, no es un error
+            if (nombre !== IFRAME_NAME) { return false; }
+            console.warn("WIT.Grabacion: no existe el control " + nombre);
             return false;
         }
 
-        var destino = urlGrabador(numeroCaso);
+        var destino = urlGrabador(numeroCaso, simple);
 
         // Primero la via soportada: deja el iframe en el DOM con la URL correcta.
         try { control.setSrc(destino); } catch (e) {
@@ -176,8 +191,14 @@ WIT.Grabacion = (function () {
         }
 
         // Y luego el atributo que Dynamics no pone, cuando el elemento exista.
-        aplicarAllow(destino, 0);
+        aplicarAllow(destino, 0, nombre);
         return true;
+    }
+
+    /** Monta las dos pestanas: la completa y la simplificada, si existen. */
+    function montarTodo(formContext, numeroCaso) {
+        montar(formContext, numeroCaso, IFRAME_NAME, false);
+        montar(formContext, numeroCaso, IFRAME_SIMPLE, true);
     }
 
     // ---- transcripcion de vuelta ------------------------------------------
@@ -260,26 +281,32 @@ WIT.Grabacion = (function () {
 
     function onLoad(executionContext) {
         _formContext = executionContext.getFormContext();
-        var tab = obtenerTab(_formContext);
+        var tabs = [
+            { tab: obtenerTab(_formContext, TAB_NAME),   control: IFRAME_NAME,   simple: false },
+            { tab: obtenerTab(_formContext, TAB_SIMPLE), control: IFRAME_SIMPLE, simple: true }
+        ];
         var esCreacion = _formContext.ui.getFormType() === FORM_TYPE_CREATE;
         var numeroCaso = numeroDeCaso(_formContext);
 
         if (esCreacion || !numeroCaso) {
-            if (tab) { tab.setVisible(false); }
+            tabs.forEach(function (t) { if (t.tab) { t.tab.setVisible(false); } });
             return;
         }
 
-        if (tab) { tab.setVisible(true); }
         escucharMensajes();
-        montar(_formContext, numeroCaso);
 
-        if (tab && tab.addTabStateChange) {
-            tab.addTabStateChange(function () {
-                if (tab.getDisplayState() === "expanded") {
-                    montar(_formContext, numeroCaso);
-                }
-            });
-        }
+        tabs.forEach(function (t) {
+            if (!t.tab) { return; }
+            t.tab.setVisible(true);
+            montar(_formContext, numeroCaso, t.control, t.simple);
+            if (t.tab.addTabStateChange) {
+                t.tab.addTabStateChange(function () {
+                    if (t.tab.getDisplayState() === "expanded") {
+                        montar(_formContext, numeroCaso, t.control, t.simple);
+                    }
+                });
+            }
+        });
     }
 
     function onSave(executionContext) {
@@ -287,10 +314,12 @@ WIT.Grabacion = (function () {
         if (_formContext.ui.getFormType() === FORM_TYPE_CREATE) { return; }
         var numeroCaso = numeroDeCaso(_formContext);
         if (!numeroCaso) { return; }
-        var tab = obtenerTab(_formContext);
-        if (tab) { tab.setVisible(true); }
+        [TAB_NAME, TAB_SIMPLE].forEach(function (n) {
+            var t = obtenerTab(_formContext, n);
+            if (t) { t.setVisible(true); }
+        });
         escucharMensajes();
-        montar(_formContext, numeroCaso);
+        montarTodo(_formContext, numeroCaso);
     }
 
     function abrirEnPestanaNueva(primaryControl) {
@@ -302,7 +331,7 @@ WIT.Grabacion = (function () {
             });
             return;
         }
-        Xrm.Navigation.openUrl(urlGrabador(numeroCaso));
+        Xrm.Navigation.openUrl(urlGrabador(numeroCaso, false));
     }
 
     return {
