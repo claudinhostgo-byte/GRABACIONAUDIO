@@ -114,6 +114,8 @@ WIT.Grabacion = (function () {
      */
     function buscarIframe(destino, nombreControl) {
         var nombre = nombreControl || IFRAME_NAME;
+
+        // 1) por el control del formulario
         try {
             var c = _formContext.getControl(nombre);
             if (c && c.getObject) {
@@ -126,14 +128,26 @@ WIT.Grabacion = (function () {
                     }
                 }
             }
-        } catch (e) { /* se sigue por src */ }
+        } catch (e) { /* se sigue buscando en el DOM */ }
 
+        // 2) por id exacto
+        var porId = document.getElementById(nombre);
+        if (porId && porId.tagName === "IFRAME") { return porId; }
+
+        // 3) por src exacto. NUNCA por coincidencia parcial del id: el nombre
+        // de la pestana completa es prefijo del de la simple
+        // ("IFRAME_grabador" dentro de "IFRAME_grabador_simple"), y una
+        // busqueda por substring devolvia el iframe equivocado, dejando al
+        // otro sin src y por lo tanto en blanco.
         var todos = document.getElementsByTagName("iframe");
         for (var i = 0; i < todos.length; i++) {
-            var src = todos[i].getAttribute("src") || "";
-            var id = todos[i].getAttribute("id") || "";
-            if (src === destino || id.indexOf(nombre) !== -1) {
+            if ((todos[i].getAttribute("src") || "") === destino) {
                 return todos[i];
+            }
+        }
+        for (var j = 0; j < todos.length; j++) {
+            if ((todos[j].getAttribute("id") || "") === nombre) {
+                return todos[j];
             }
         }
         return null;
@@ -158,7 +172,8 @@ WIT.Grabacion = (function () {
             setTimeout(function () {
                 try { el.setAttribute("src", destino); } catch (e) {}
             }, 60);
-            console.log("WIT.Grabacion: allow=\"" + ALLOW + "\" aplicado (intento " + intento + ")");
+            console.log("WIT.Grabacion: " + nombreControl + " -> allow=\"" + ALLOW +
+                        "\" y src aplicados (intento " + intento + ")");
             return true;
         }
 
