@@ -919,9 +919,10 @@ const BARS = 56, GAP = 3, VIZ_H = 140;
 
 /** prepara el canvas al ancho actual y devuelve {ctx, w, h, bw} */
 function vizGeom(){
-  const cv = $('viz'), ctx = cv.getContext('2d');
+  const cv = $(MODO_SIMPLE ? 'vizSimple' : 'viz');
+  const ctx = cv.getContext('2d');
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = cv.clientWidth || 900, h = VIZ_H;
+  const w = cv.clientWidth || 900, h = cv.clientHeight || VIZ_H;
   cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { ctx, w, h, bw: (w - GAP * (BARS - 1)) / BARS };
@@ -975,7 +976,7 @@ function startViz(){
       let sum = 0;
       for (let j = 0; j < step; j++) sum += bins[i * step + j] || 0;
       const v = (sum / step) / 255;
-      bar(ctx, i * (bw + GAP), mid, bw, Math.max(2, v * (h - 26)), live, p);
+      bar(ctx, i * (bw + GAP), mid, bw, Math.max(2, v * (h - 18)), live, p);
     }
   };
   cancelAnimationFrame(S.raf); draw();
@@ -1497,6 +1498,7 @@ async function simpleGrabar(){
 
   simpleEstado('Grabando…', false);
   $('simpleDot').classList.remove('hidden');
+  setTimeout(drawIdle, 0);
   $('simpleRec').disabled = true;
   $('simpleStop').disabled = false;
   $('simplePers').disabled = true;

@@ -347,3 +347,11 @@ body.modo-simple .card{margin-bottom:0}
 #simpleOut .trsegs{max-height:none}
 #simpleOut .trsegs li{cursor:default}
 #simpleOut .trsegs li:hover{background:none}
+
+/* medidor en vivo de la pantalla simple: ademas de indicar que graba, deja
+   ver si el microfono realmente esta captando senal */
+.simple-rec{position:relative;overflow:hidden}
+.vizsimple{position:absolute;inset:0;width:100%;height:100%;display:block;opacity:.85}
+.simple-rec .simple-timer,
+.simple-rec .simple-estado,
+.simple-rec .simple-prog{position:relative;z-index:1}
