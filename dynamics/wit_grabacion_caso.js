@@ -66,6 +66,10 @@ WIT.Grabacion = (function () {
 
     var _formContext = null;
     var _escuchando = false;
+    var _vigilante = null;      // intervalo que mantiene los iframes correctos
+    var _objetivos = [];        // [{destino, control}] a vigilar
+    var _montados = {};         // para no repetir el log de montaje
+    var _ciclos = 0;
 
     // ---- utilidades --------------------------------------------------------
 
@@ -154,59 +158,95 @@ WIT.Grabacion = (function () {
     }
 
     /**
-     * Fija el atributo allow y recarga el iframe para que aplique.
-     * Reintenta con espera creciente: la UCI puede renderizar el iframe
-     * despues del OnLoad, o re-renderizarlo borrando el atributo.
+     * Asegura que el iframe tenga el atributo allow y la URL correcta.
+     *
+     * La interfaz unificada renderiza el contenido de una pestana recien
+     * cuando el usuario la abre, y al hacerlo aplica la URL configurada en el
+     * formulario (about:blank), descartando lo que se haya puesto antes. Por
+     * eso no basta con reintentar unos segundos tras el OnLoad: hace falta un
+     * vigilante que corrija el iframe cada vez que la UCI lo vuelva a armar.
      */
-    function aplicarAllow(destino, intento, nombreControl) {
-        intento = intento || 0;
+    function asegurarIframe(destino, nombreControl) {
         var el = buscarIframe(destino, nombreControl);
+        if (!el) { return false; }
 
-        if (el) {
-            if (el.getAttribute("allow") === ALLOW) {
-                return true;                      // ya estaba, nada que hacer
-            }
-            el.setAttribute("allow", ALLOW);
-            // el atributo solo aplica en una navegacion nueva
+        var faltaAllow = el.getAttribute("allow") !== ALLOW;
+        var srcActual = el.getAttribute("src") || "";
+        var faltaSrc = srcActual !== destino;
+
+        if (!faltaAllow && !faltaSrc) { return true; }   // ya estaba bien
+
+        if (faltaAllow) { el.setAttribute("allow", ALLOW); }
+
+        if (faltaSrc) {
+            el.setAttribute("src", destino);
+        } else {
+            // el allow solo aplica en una navegacion nueva: hay que recargar
             el.setAttribute("src", "about:blank");
             setTimeout(function () {
                 try { el.setAttribute("src", destino); } catch (e) {}
-            }, 60);
-            console.log("WIT.Grabacion: " + nombreControl + " -> allow=\"" + ALLOW +
-                        "\" y src aplicados (intento " + intento + ")");
-            return true;
+            }, 50);
         }
 
-        if (intento < 6) {
-            setTimeout(function () {
-                aplicarAllow(destino, intento + 1, nombreControl);
-            }, 300 * (intento + 1));
-        } else {
-            console.warn("WIT.Grabacion: no se encontro el iframe; microfono y camara " +
-                         "quedaran bloqueados y la pagina ofrecera abrirse aparte.");
+        if (!_montados[nombreControl]) {
+            _montados[nombreControl] = true;
+            console.log("WIT.Grabacion: " + nombreControl + " montado con allow=\"" +
+                        ALLOW + "\"");
         }
-        return false;
+        return true;
+    }
+
+    /**
+     * Revisa periodicamente los iframes registrados. Es barato (un
+     * getElementById y dos lecturas de atributo) y hace el montaje inmune al
+     * momento en que la UCI decida renderizar o re-renderizar la pestana.
+     */
+    function vigilar() {
+        if (_vigilante) { return; }
+        _vigilante = setInterval(function () {
+            var pendientes = 0;
+            for (var i = 0; i < _objetivos.length; i++) {
+                if (!asegurarIframe(_objetivos[i].destino, _objetivos[i].control)) {
+                    pendientes++;
+                }
+            }
+            _ciclos++;
+            // tras un rato sin encontrar ninguno, se avisa una sola vez
+            if (_ciclos === 20 && pendientes === _objetivos.length) {
+                console.warn("WIT.Grabacion: los iframes no aparecen en el DOM. " +
+                             "Abra la pestana del grabador; si sigue en blanco, " +
+                             "revise que el control IFRAME exista en este formulario.");
+            }
+        }, 1200);
     }
 
     function montar(formContext, numeroCaso, nombreControl, simple) {
         var nombre = nombreControl || IFRAME_NAME;
         var control = formContext.getControl(nombre);
         if (!control) {
-            // la pestana simplificada es opcional: si no esta, no es un error
-            if (nombre !== IFRAME_NAME) { return false; }
-            console.warn("WIT.Grabacion: no existe el control " + nombre);
+            // cada pestana es opcional: que falte una no es un error
             return false;
         }
 
         var destino = urlGrabador(numeroCaso, simple);
 
-        // Primero la via soportada: deja el iframe en el DOM con la URL correcta.
+        // via soportada: deja la URL registrada en el control
         try { control.setSrc(destino); } catch (e) {
-            console.error("WIT.Grabacion: setSrc fallo", e);
+            console.error("WIT.Grabacion: setSrc fallo en " + nombre, e);
         }
 
-        // Y luego el atributo que Dynamics no pone, cuando el elemento exista.
-        aplicarAllow(destino, 0, nombre);
+        // se registra para que el vigilante lo mantenga correcto
+        var ya = false;
+        for (var i = 0; i < _objetivos.length; i++) {
+            if (_objetivos[i].control === nombre) {
+                _objetivos[i].destino = destino;
+                ya = true;
+            }
+        }
+        if (!ya) { _objetivos.push({ destino: destino, control: nombre }); }
+
+        asegurarIframe(destino, nombre);
+        vigilar();
         return true;
     }
 
