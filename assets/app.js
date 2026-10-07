@@ -1540,53 +1540,89 @@ async function continuarSimple(){
   renderSimple(S.tr);
 }
 
-/** Muestra la transcripción separada por hablante. */
+/** Muestra la transcripción como una conversación, por hablante. */
 function renderSimple(t){
   $('simpleAviso').classList.toggle('hidden', !t.mock);
   if (t.mock){
     $('simpleAviso').textContent = 'Transcripción simulada: no proviene de Azure AI Speech.';
   }
 
-  const hablantes = new Set((t.phrases || []).map((p) => p.speaker).filter((x) => x != null));
+  const frases = t.phrases || [];
+  const hablantes = new Set(frases.map((p) => p.speaker).filter((x) => x != null));
+
   $('simpleStats').innerHTML = '';
   const sp = document.createElement('span');
   sp.textContent = [
     String(t.text).split(/\s+/).filter(Boolean).length + ' palabras',
     hablantes.size ? hablantes.size + ' hablantes identificados' : 'sin separación de hablantes',
-    (t.phrases || []).length + ' segmentos'
+    frases.length + ' intervenciones'
   ].join(' · ');
   $('simpleStats').appendChild(sp);
 
   const ol = $('simpleSegs');
+  ol.className = 'conv';
   ol.innerHTML = '';
 
-  const frases = t.phrases || [];
   if (!frases.length){
     const li = document.createElement('li');
-    const tx = document.createElement('span');
-    tx.className = 'txt'; tx.textContent = t.text;
-    li.appendChild(tx); ol.appendChild(li);
+    li.className = 'izq';
+    const b = document.createElement('div');
+    b.className = 'conv-burbuja'; b.textContent = t.text;
+    li.appendChild(b); ol.appendChild(li);
   } else {
+    // los hablantes se alternan a izquierda y derecha para leerse como un diálogo
+    const lados = {};
+    let siguiente = 0;
     frases.forEach((p) => {
-      const li = document.createElement('li');
+      const n = p.speaker != null ? Number(p.speaker) : 0;
+      if (!(n in lados)){ lados[n] = siguiente % 2 === 0 ? 'izq' : 'der'; siguiente++; }
 
-      const ts = document.createElement('span');
-      ts.className = 'ts'; ts.textContent = fmtTime(p.offsetMs);
-      li.appendChild(ts);
+      const li = document.createElement('li');
+      li.className = lados[n] + (n ? ' s' + ((n - 1) % 4 + 1) : '');
+
+      const meta = document.createElement('div');
+      meta.className = 'conv-meta';
 
       if (p.speaker != null){
         const chip = document.createElement('span');
-        chip.className = 'spk s' + ((Number(p.speaker) - 1) % 4 + 1);
+        chip.className = 'spk s' + ((n - 1) % 4 + 1);
         chip.textContent = 'Hablante ' + p.speaker;
-        li.appendChild(chip);
+        meta.appendChild(chip);
       }
 
-      const tx = document.createElement('span');
-      tx.className = 'txt'; tx.textContent = p.text;
-      li.appendChild(tx);
+      const ts = document.createElement('span');
+      ts.textContent = fmtTime(p.offsetMs);
+      meta.appendChild(ts);
+
+      if (p.confidence != null){
+        const cf = document.createElement('span');
+        const pct = Math.round(p.confidence * 100);
+        cf.className = 'conv-conf' + (pct < 70 ? ' baja' : '');
+        cf.textContent = pct + '%';
+        cf.title = 'Confianza del reconocimiento del texto, no de la asignación de hablante';
+        meta.appendChild(cf);
+      }
+
+      li.appendChild(meta);
+
+      const b = document.createElement('div');
+      b.className = 'conv-burbuja'; b.textContent = p.text;
+      li.appendChild(b);
 
       ol.appendChild(li);
     });
+  }
+
+  // El porcentaje es de reconocimiento del texto. Azure no entrega una
+  // confianza de atribucion de hablante, y rotularlo como tal seria presentar
+  // un dato como si midiera algo que no mide.
+  const nota = $('simpleNota');
+  if (frases.some((p) => p.confidence != null)){
+    nota.textContent = 'El porcentaje indica la confianza de Azure en el texto reconocido. ' +
+      'La asignación de hablante no trae puntaje: Azure la entrega o la omite.';
+    nota.classList.remove('hidden');
+  } else {
+    nota.classList.add('hidden');
   }
 
   $('simpleOut').classList.remove('hidden');

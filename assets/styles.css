@@ -355,3 +355,29 @@ body.modo-simple .card{margin-bottom:0}
 .simple-rec .simple-timer,
 .simple-rec .simple-estado,
 .simple-rec .simple-prog{position:relative;z-index:1}
+
+/* ---------- vista de conversacion ---------- */
+.conv{list-style:none;margin:10px 0 0;padding:14px;display:flex;flex-direction:column;
+  gap:12px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg)}
+.conv li{display:flex;flex-direction:column;max-width:80%}
+.conv li.der{align-self:flex-end;align-items:flex-end}
+.conv li.izq{align-self:flex-start;align-items:flex-start}
+.conv-meta{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;
+  color:var(--ink2)}
+.conv-burbuja{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:9px 13px;font-size:13.5px;line-height:1.5;box-shadow:var(--sh)}
+.conv li.der .conv-burbuja{border-top-right-radius:2px}
+.conv li.izq .conv-burbuja{border-top-left-radius:2px}
+.conv li.s1 .conv-burbuja{border-left:3px solid var(--brand)}
+.conv li.s2 .conv-burbuja{border-left:3px solid var(--ok)}
+.conv li.s3 .conv-burbuja{border-left:3px solid #8a5a00}
+.conv li.s4 .conv-burbuja{border-left:3px solid var(--rec)}
+.conv li.der .conv-burbuja{border-left:0}
+.conv li.der.s1 .conv-burbuja{border-right:3px solid var(--brand)}
+.conv li.der.s2 .conv-burbuja{border-right:3px solid var(--ok)}
+.conv li.der.s3 .conv-burbuja{border-right:3px solid #8a5a00}
+.conv li.der.s4 .conv-burbuja{border-right:3px solid var(--rec)}
+.conv-conf{font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:var(--r);
+  background:var(--hover)}
+.conv-conf.baja{background:var(--warn-bg);color:#8a5a00;font-weight:600}
+.conv-nota{font-size:11.5px;color:var(--ink2);margin:10px 0 0;line-height:1.5}
