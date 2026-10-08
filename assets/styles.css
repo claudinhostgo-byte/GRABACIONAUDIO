@@ -388,3 +388,7 @@ body.modo-simple .card{margin-bottom:0}
   color:var(--ink2);background:var(--hover);border:1px solid var(--line);
   border-radius:var(--r);padding:1px 6px;font-variant-numeric:tabular-nums;
   white-space:nowrap;vertical-align:middle;align-self:center}
+
+/* en la pantalla simple el selector de microfono ocupa el ancho disponible */
+.simple-pers label{min-width:168px}
+#simpleMic{max-width:none;flex:1}

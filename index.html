@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-3" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-5" />
 </head>
 <body>
 <div class="shell">
@@ -127,7 +127,7 @@
       <div class="microw">
         <div class="grow">
           <label for="micSel">Micrófono</label>
-          <select id="micSel" disabled><option>— sin permiso de micrófono —</option></select>
+          <select id="micSel" disabled><option value="">— sin permiso de micrófono —</option></select>
         </div>
         <button id="btnPerm" class="ghost" type="button">Permitir micrófono</button>
       </div>
@@ -204,6 +204,13 @@
     </div>
 
     <div class="simple-pers">
+      <label for="simpleMic">Micrófono</label>
+      <select id="simpleMic" disabled>
+        <option value="">— toque Grabar para permitir el micrófono —</option>
+      </select>
+    </div>
+
+    <div class="simple-pers">
       <label for="simplePers">¿Cuántas personas hablan?</label>
       <select id="simplePers">
         <option value="1">1 persona</option>
@@ -267,7 +274,7 @@
       <div class="microw">
         <div class="grow">
           <label for="camSel">Cámara</label>
-          <select id="camSel" disabled><option>— sin permiso de cámara —</option></select>
+          <select id="camSel" disabled><option value="">— sin permiso de cámara —</option></select>
         </div>
         <div>
           <label for="clipMax">Duración máxima</label>
@@ -321,6 +328,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.08-3"></script>
+<script src="assets/app.js?v=2026.10.08-5"></script>
 </body>
 </html>

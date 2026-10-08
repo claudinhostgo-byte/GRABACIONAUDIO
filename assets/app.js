@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-3';
+const VERSION = '2026.10.08-5';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -574,7 +574,7 @@ async function listarCamaras(){
   const sel = $('camSel'), prev = sel.value;
   sel.innerHTML = '';
   if (!devs.length){
-    sel.innerHTML = '<option>-- sin cámaras detectadas --</option>';
+    sel.innerHTML = '<option value="">-- sin cámaras detectadas --</option>';
     sel.disabled = true; return;
   }
   devs.forEach((d, i) => {
@@ -585,13 +585,56 @@ async function listarCamaras(){
   });
   sel.disabled = false;
   if (prev && devs.some((d) => d.deviceId === prev)) sel.value = prev;
+
+  espejarMicrofonos(devs);
+}
+
+/** Replica la lista en el selector de la pantalla simple, que es otro control. */
+function espejarMicrofonos(devs){
+  const sim = $('simpleMic');
+  if (!sim) return;
+  const prev = sim.value;
+  sim.innerHTML = '';
+  if (!devs.length){
+    sim.innerHTML = '<option value="">-- sin micrófonos detectados --</option>';
+    sim.disabled = true;
+    return;
+  }
+  devs.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || ('Micrófono ' + (i + 1));
+    sim.appendChild(o);
+  });
+  sim.disabled = false;
+  if (prev && devs.some((d) => d.deviceId === prev)) sim.value = prev;
+}
+
+/**
+ * Micrófono elegido en la pantalla activa.
+ * Un selector deshabilitado o posado sobre el texto de relleno no es una
+ * elección: devolver ese texto como si fuera un deviceId hacía que se pidiera
+ * un dispositivo inexistente y que nunca se solicitara el permiso.
+ */
+function valorDeSelector(el){
+  if (!el || el.disabled) return '';
+  const op = el.options[el.selectedIndex];
+  return (op && op.value) ? op.value : '';
+}
+
+function micSeleccionado(){
+  if (MODO_SIMPLE){
+    const v = valorDeSelector($('simpleMic'));
+    if (v) return v;
+  }
+  return valorDeSelector($('micSel'));
 }
 
 /** Previsualización en vivo; se rearma al cambiar de cámara. */
 async function previsualizar(){
   detenerCamara();
   try {
-    const devId = $('camSel').value;
+    const devId = valorDeSelector($('camSel'));
     S.cam.stream = await navigator.mediaDevices.getUserMedia({
       video: devId ? { deviceId: { exact: devId } } : true,
       audio: { echoCancellation: true, noiseSuppression: true }
@@ -905,7 +948,7 @@ async function listMics(){
   const sel = $('micSel'), prev = sel.value;
   sel.innerHTML = '';
   if (!devs.length){
-    sel.innerHTML = '<option>-- sin micrófonos detectados --</option>';
+    sel.innerHTML = '<option value="">-- sin micrófonos detectados --</option>';
     sel.disabled = true; return;
   }
   devs.forEach((d, i) => {
@@ -916,6 +959,49 @@ async function listMics(){
   });
   sel.disabled = false;
   if (prev && devs.some((d) => d.deviceId === prev)) sel.value = prev;
+
+  espejarMicrofonos(devs);
+}
+
+/** Replica la lista en el selector de la pantalla simple, que es otro control. */
+function espejarMicrofonos(devs){
+  const sim = $('simpleMic');
+  if (!sim) return;
+  const prev = sim.value;
+  sim.innerHTML = '';
+  if (!devs.length){
+    sim.innerHTML = '<option value="">-- sin micrófonos detectados --</option>';
+    sim.disabled = true;
+    return;
+  }
+  devs.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || ('Micrófono ' + (i + 1));
+    sim.appendChild(o);
+  });
+  sim.disabled = false;
+  if (prev && devs.some((d) => d.deviceId === prev)) sim.value = prev;
+}
+
+/**
+ * Micrófono elegido en la pantalla activa.
+ * Un selector deshabilitado o posado sobre el texto de relleno no es una
+ * elección: devolver ese texto como si fuera un deviceId hacía que se pidiera
+ * un dispositivo inexistente y que nunca se solicitara el permiso.
+ */
+function valorDeSelector(el){
+  if (!el || el.disabled) return '';
+  const op = el.options[el.selectedIndex];
+  return (op && op.value) ? op.value : '';
+}
+
+function micSeleccionado(){
+  if (MODO_SIMPLE){
+    const v = valorDeSelector($('simpleMic'));
+    if (v) return v;
+  }
+  return valorDeSelector($('micSel'));
 }
 
 /* ---------- visualizador ---------- */
@@ -999,7 +1085,7 @@ function pickMime(){
 async function startRec(){
   banner('');
   try {
-    const devId = $('micSel').value;
+    const devId = micSeleccionado();
     S.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: devId ? { exact: devId } : undefined,
@@ -1491,10 +1577,10 @@ async function simpleGrabar(){
   S.cfg.diarize = simpleDiarize();
 
   // el permiso se pide en el primer intento, no antes
-  if ($('micSel').disabled || !$('micSel').value){
+  if (!micSeleccionado()){
     simpleEstado('Solicitando acceso al micrófono…', true);
     await askPermission();
-    if ($('micSel').disabled || !$('micSel').value){
+    if (!micSeleccionado()){
       simpleError('No se pudo acceder al micrófono. Revise el permiso del navegador.');
       return;
     }
@@ -1506,6 +1592,7 @@ async function simpleGrabar(){
   $('simpleRec').disabled = true;
   $('simpleStop').disabled = false;
   $('simplePers').disabled = true;
+  $('simpleMic').disabled = true;
   await startRec();
 }
 
@@ -1519,6 +1606,9 @@ function simpleDetener(){
 /** Encadena subida y transcripción sin intervención del usuario. */
 async function continuarSimple(){
   $('simplePers').disabled = false;
+  if ($('simpleMic').options.length && $('simpleMic').options[0].value){
+    $('simpleMic').disabled = false;
+  }
 
   if (!cfgReady()){
     simpleError('Falta configurar el destino en Azure.');
@@ -1749,6 +1839,7 @@ function init(){
   };
 
   $('btnCam').onclick        = permitirCamara;
+  $('simpleMic').onchange   = () => { $('micSel').value = $('simpleMic').value; };
   $('simpleRec').onclick    = simpleGrabar;
   $('simpleStop').onclick   = simpleDetener;
   $('simpleCopiar').onclick = () => navigator.clipboard.writeText(S.tr.text)
