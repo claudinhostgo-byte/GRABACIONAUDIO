@@ -20,6 +20,7 @@ Variables de entorno:
 import json
 import logging
 import os
+import re
 
 import requests
 
@@ -51,6 +52,34 @@ INSTRUCCIONES = (
     '{"resultados":[{"indice":1,"cumple":"si|parcial|no",'
     '"evidencia":"cita literal o null","justificacion":"una frase breve"}]}'
 )
+
+
+def _json_del_texto(texto):
+    """Extrae el objeto JSON de la respuesta.
+
+    Con response_format el contenido es JSON puro, pero si el modelo no admite
+    ese parametro puede venir envuelto en texto o en un bloque de codigo.
+    """
+    if not texto:
+        return None
+    texto = texto.strip()
+    try:
+        return json.loads(texto)
+    except Exception:
+        pass
+    bloque = re.search(r"```(?:json)?\s*(.+?)```", texto, re.S)
+    if bloque:
+        try:
+            return json.loads(bloque.group(1).strip())
+        except Exception:
+            pass
+    ini, fin = texto.find("{"), texto.rfind("}")
+    if ini != -1 and fin > ini:
+        try:
+            return json.loads(texto[ini:fin + 1])
+        except Exception:
+            pass
+    return None
 
 
 class EvalConfigError(Exception):
@@ -100,22 +129,38 @@ def evaluar(texto, criterios=None):
     url = "%s/openai/deployments/%s/chat/completions?api-version=%s" % (
         endpoint, deployment, api_version)
 
-    try:
-        r = requests.post(
-            url,
-            headers={"api-key": key, "Content-Type": "application/json"},
-            json={
-                "messages": [
-                    {"role": "system", "content": INSTRUCCIONES},
-                    {"role": "user", "content": usuario},
-                ],
-                "temperature": 0,
-                "response_format": {"type": "json_object"},
-            },
-            timeout=120,
-        )
-    except requests.RequestException as e:
-        raise EvalUpstreamError("Fallo al llamar a Azure OpenAI: %s" % e)
+    cabeceras = {"api-key": key, "Content-Type": "application/json"}
+    cuerpo = {
+        "messages": [
+            {"role": "system", "content": INSTRUCCIONES},
+            {"role": "user", "content": usuario},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+
+    def pedir(payload):
+        try:
+            return requests.post(url, headers=cabeceras, json=payload, timeout=120)
+        except requests.RequestException as e:
+            raise EvalUpstreamError("Fallo al llamar a Azure OpenAI: %s" % e)
+
+    r = pedir(cuerpo)
+
+    # Los modelos de razonamiento rechazan temperature y algunos no aceptan
+    # response_format. Antes de darlo por error se reintenta sin el parametro
+    # que la propia respuesta senala, para no atar el codigo a un modelo.
+    if r.status_code == 400:
+        detalle = (r.text or "").lower()
+        quitados = []
+        for parametro in ("temperature", "response_format"):
+            if parametro in detalle and parametro in cuerpo:
+                cuerpo.pop(parametro)
+                quitados.append(parametro)
+        if quitados:
+            logging.info("Azure OpenAI rechazo %s; se reintenta sin ese parametro",
+                         ", ".join(quitados))
+            r = pedir(cuerpo)
 
     if r.status_code >= 300:
         raise EvalUpstreamError("Azure OpenAI respondio %d" % r.status_code,
@@ -123,9 +168,14 @@ def evaluar(texto, criterios=None):
 
     try:
         contenido = r.json()["choices"][0]["message"]["content"]
-        datos = json.loads(contenido)
     except Exception as e:
-        raise EvalUpstreamError("Respuesta no interpretable de Azure OpenAI: %s" % e)
+        raise EvalUpstreamError("Respuesta inesperada de Azure OpenAI: %s" % e)
+
+    datos = _json_del_texto(contenido)
+    if datos is None:
+        raise EvalUpstreamError(
+            "El modelo no devolvio JSON interpretable.",
+            detail=(contenido or "")[:500])
 
     crudos = datos.get("resultados") or []
     salida = []
