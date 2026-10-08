@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-7';
+const VERSION = '2026.10.08-8';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -27,6 +27,7 @@ const CFG_NUBE = {
   trUrl: '/api/transcribe',
   trMockUrl: '',
   recUrl: '/api/records',
+  evalUrl: '/api/evaluar',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -41,6 +42,7 @@ const CFG_LOCAL = {
   trUrl: 'http://localhost:8000/api/transcribe',
   trMockUrl: 'http://localhost:5501/transcribe',
   recUrl: 'http://localhost:5501/records',
+  evalUrl: 'http://localhost:5501/evaluar',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -233,6 +235,7 @@ function saveCfg(){
     trUrl:     $('cfgTrUrl').value.trim(),
     trMockUrl: $('cfgTrMockUrl').value.trim(),
     recUrl:    S.cfg.recUrl,
+    evalUrl:   S.cfg.evalUrl,
     locale:    $('cfgLocale').value,
     diarize:   $('cfgDiarize').value
   };
@@ -537,6 +540,106 @@ async function transcribirExistente(it, zona, btn){
   }
 }
 
+
+
+/* ---------- Panel de revisión del guion ---------- */
+
+/* Puntos a verificar. Viven aquí para la POC; el backend acepta la lista en la
+   petición, de modo que puedan venir de configuración sin tocar la página. */
+const CRITERIOS = [
+  '¿El funcionario ofreció créditos?',
+  '¿El funcionario explicó los beneficios?',
+  '¿Se informó sobre Coopeuch Educa?'
+];
+
+const MARCAS = { si: '✓', parcial: '~', no: '✕', pend: '·' };
+
+function pintarCriterios(resultados){
+  const ol = $('listaCriterios');
+  ol.innerHTML = '';
+
+  CRITERIOS.forEach((criterio, i) => {
+    const r = resultados ? resultados[i] : null;
+    const estado = r ? r.cumple : 'pend';
+
+    const li = document.createElement('li');
+
+    const cab = document.createElement('div');
+    cab.className = 'crit-cab';
+
+    const marca = document.createElement('span');
+    marca.className = 'crit-marca ' + estado;
+    marca.textContent = MARCAS[estado] || MARCAS.pend;
+    marca.title = { si: 'Se trató', parcial: 'Se mencionó de forma incompleta',
+                    no: 'No aparece', pend: 'Sin revisar' }[estado];
+    cab.appendChild(marca);
+
+    const txt = document.createElement('span');
+    txt.className = 'crit-texto';
+    txt.textContent = (r && r.criterio) || criterio;
+    cab.appendChild(txt);
+
+    li.appendChild(cab);
+
+    if (r && r.evidencia){
+      const ev = document.createElement('div');
+      ev.className = 'crit-evidencia';
+      ev.textContent = '«' + r.evidencia + '»';
+      li.appendChild(ev);
+    }
+    if (r && r.justificacion){
+      const ju = document.createElement('div');
+      ju.className = 'crit-just';
+      ju.textContent = r.justificacion;
+      li.appendChild(ju);
+    }
+
+    ol.appendChild(li);
+  });
+}
+
+async function evaluarGuion(){
+  if (!S.tr || !S.tr.text){
+    setMsg($('evalMsg'), 'Primero tiene que haber una transcripción.', 'bad');
+    return;
+  }
+  const url = S.cfg.evalUrl;
+  if (!url){
+    setMsg($('evalMsg'), 'Falta el endpoint de revisión en Configuración.', 'bad');
+    return;
+  }
+
+  const btn = $('btnEvaluar');
+  btn.disabled = true;
+  $('evalMsg').innerHTML = '<span class="spin"></span>Revisando la conversación…';
+  $('evalMsg').className = 'msg';
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texto: S.tr.text, blobName: S.tr.blobName,
+                             recordId: S.id, criterios: CRITERIOS })
+    });
+    const txt = await res.text();
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+
+    pintarCriterios(d.resultados || []);
+    setMsg($('evalMsg'), d.mock ? 'Revisión simulada.' : 'Revisión lista.', d.mock ? 'bad' : 'ok');
+
+    const aviso = $('evalAviso');
+    aviso.textContent = d.aviso ||
+      'Indicio automático sobre el contenido de la conversación. No constituye una ' +
+      'evaluación de la persona ni reemplaza una revisión humana.';
+    aviso.classList.remove('hidden');
+  } catch (e){
+    setMsg($('evalMsg'), 'No se pudo revisar: ' + e.message, 'bad');
+  }
+  btn.disabled = false;
+}
 
 /* ---------- Clip de evidencia ---------- */
 
@@ -1720,6 +1823,9 @@ function renderSimple(t){
     nota.classList.add('hidden');
   }
 
+  pintarCriterios(null);
+  setMsg($('evalMsg'), '');
+  $('evalAviso').classList.add('hidden');
   $('simpleOut').classList.remove('hidden');
 }
 
@@ -1769,8 +1875,12 @@ function simpleMostrarPrevia(d){
   const t = it.transcript;
   if (t && t.text){
     $('simpleTr').classList.add('hidden');
-    // lo almacenado trae offsetMilliseconds; la UI usa la forma normalizada
-    renderSimple({ text: t.text, phrases: normalizePhrases(t), mock: !!t.mock });
+    // se registra en el estado: el panel de revision y el boton de copiar
+    // trabajan sobre S.tr, no sobre lo que haya en pantalla
+    S.tr = { text: t.text, phrases: normalizePhrases(t), mock: !!t.mock,
+             locale: (t.locales && t.locales[0]) || S.cfg.locale,
+             blobName: it.blobName };
+    renderSimple(S.tr);
   } else {
     $('simpleOut').classList.add('hidden');
     $('simpleTr').classList.remove('hidden');
@@ -1928,6 +2038,7 @@ function init(){
   $('simpleCopiar').onclick = () => navigator.clipboard.writeText(S.tr.text)
     .then(() => { $('simpleCopiar').textContent = 'Copiado'; });
   $('simpleTr').onclick     = simpleTranscribirPrevia;
+  $('btnEvaluar').onclick   = evaluarGuion;
   $('simpleOtra').onclick   = () => {
     if (S.previa) return;                 // caso con grabacion: solo lectura
     resetTake();

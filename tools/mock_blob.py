@@ -75,11 +75,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         ruta = urlparse(self.path).path.rstrip("/")
+        if ruta == "/evaluar":
+            return self._evaluar()
         if ruta == "/records":
             return self._records()
         if ruta != "/transcribe":
             return self._fail(404, "ResourceNotFound", "Ruta no soportada.")
         return self._transcribe()
+
+    def _evaluar(self):
+        """Simulador de la revision de guion. NO analiza nada."""
+        size = int(self.headers.get("Content-Length") or 0)
+        try:
+            req = json.loads(self.rfile.read(size) or b"{}")
+        except ValueError:
+            return self._fail(400, "InvalidInput", "JSON invalido.")
+
+        criterios = req.get("criterios") or [
+            "¿El funcionario ofreció créditos?",
+            "¿El funcionario explicó los beneficios?",
+            "¿Se informó sobre Coopeuch Educa?",
+        ]
+        estados = ["si", "parcial", "no"]
+        resultados = []
+        for i, c in enumerate(criterios):
+            e = estados[i % 3]
+            resultados.append({
+                "indice": i + 1,
+                "criterio": c,
+                "cumple": e,
+                "evidencia": None if e == "no" else "(cita simulada, no proviene de la conversacion)",
+                "justificacion": "Resultado simulado para validar la interfaz.",
+            })
+
+        payload = {"mock": True, "resultados": resultados, "modelo": "simulador",
+                   "aviso": "Resultado SIMULADO: no proviene de ningun analisis real."}
+        print("  POST /evaluar  %d puntos simulados" % len(resultados), flush=True)
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _records(self):
         """Grabaciones existentes de un ID, con su transcripcion si la hay."""

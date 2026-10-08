@@ -392,3 +392,29 @@ body.modo-simple .card{margin-bottom:0}
 /* en la pantalla simple el selector de microfono ocupa el ancho disponible */
 .simple-pers label{min-width:168px}
 #simpleMic{max-width:none;flex:1}
+
+/* ---------- transcripcion + panel de revision, lado a lado ---------- */
+.columnas{display:flex;gap:16px;align-items:flex-start}
+.col-texto{flex:1 1 60%;min-width:0}
+.col-panel{flex:0 0 320px;border:1px solid var(--line);border-radius:var(--r-lg);
+  background:var(--bg);padding:12px 14px}
+@media (max-width:860px){
+  .columnas{flex-direction:column}
+  .col-panel{flex:1 1 auto;width:100%}
+}
+
+.criterios{list-style:none;margin:10px 0 0;padding:0;display:flex;
+  flex-direction:column;gap:8px}
+.criterios li{background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:9px 11px}
+.crit-cab{display:flex;gap:8px;align-items:flex-start}
+.crit-marca{flex:0 0 18px;width:18px;height:18px;border-radius:50%;display:grid;
+  place-items:center;font-size:11px;font-weight:700;color:#fff;margin-top:1px}
+.crit-marca.si{background:var(--ok)}
+.crit-marca.parcial{background:#b37800}
+.crit-marca.no{background:var(--rec-b)}
+.crit-marca.pend{background:var(--ink3)}
+.crit-texto{flex:1;font-size:12.5px;line-height:1.45}
+.crit-evidencia{margin-top:7px;padding-left:9px;border-left:2px solid var(--line);
+  font-size:11.5px;color:var(--ink2);line-height:1.5;font-style:italic}
+.crit-just{margin-top:5px;font-size:11px;color:var(--ink2)}

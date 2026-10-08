@@ -24,7 +24,8 @@ import sys
 from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "api", "shared"))
-import core  # noqa: E402
+import core        # noqa: E402
+import evaluacion  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WWW = os.path.abspath(os.path.join(HERE, ".."))        # index.html y assets/ del repo
@@ -99,6 +100,29 @@ def api_records():
     except Exception as e:
         return _fail(e)
     return jsonify(datos)
+
+
+@app.post("/api/evaluar")
+def api_evaluar():
+    body = request.get_json(silent=True) or {}
+    texto = body.get("texto")
+    blob = body.get("blobName")
+    if not texto and blob:
+        try:
+            datos = core.listar_grabaciones(body.get("recordId") or blob.split("/")[0])
+            item = next((x for x in datos["items"] if x["blobName"] == blob), None)
+            if item and item.get("transcript"):
+                texto = item["transcript"].get("text")
+        except Exception as e:
+            app.logger.warning("No se pudo recuperar la transcripcion: %s", e)
+    try:
+        return jsonify(evaluacion.evaluar(texto, body.get("criterios")))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except evaluacion.EvalConfigError as e:
+        return jsonify({"error": str(e)}), 500
+    except evaluacion.EvalUpstreamError as e:
+        return jsonify({"error": str(e), "detail": getattr(e, "detail", None)}), 502
 
 
 @app.get("/api/health")

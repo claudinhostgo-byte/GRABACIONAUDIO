@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-7" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-8" />
 </head>
 <body>
 <div class="shell">
@@ -247,6 +247,8 @@
     </div>
 
     <div id="simpleOut" class="hidden">
+      <div class="columnas">
+        <div class="col-texto">
       <h3 class="trh">Transcripción</h3>
       <div id="simpleAviso" class="banner mock hidden"></div>
       <div id="simpleStats" class="trmeta"></div>
@@ -255,6 +257,20 @@
       <div class="ctrls">
         <button id="simpleCopiar" class="ghost small" type="button">Copiar texto</button>
         <button id="simpleOtra" class="ghost small" type="button">Grabar otra vez</button>
+      </div>
+        </div>
+
+        <aside class="col-panel" id="panelIA">
+          <h3 class="trh">Revisión del guion</h3>
+          <p class="hint">Verifica si estos puntos se trataron en la conversación.
+            Cada resultado afirmativo incluye la cita que lo respalda.</p>
+          <ol id="listaCriterios" class="criterios"></ol>
+          <div class="ctrls">
+            <button id="btnEvaluar" class="primary small" type="button">Revisar</button>
+          </div>
+          <div id="evalMsg" class="msg"></div>
+          <p id="evalAviso" class="conv-nota hidden"></p>
+        </aside>
       </div>
     </div>
   </section>
@@ -337,6 +353,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.08-7"></script>
+<script src="assets/app.js?v=2026.10.08-8"></script>
 </body>
 </html>
