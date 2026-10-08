@@ -70,6 +70,7 @@ WIT.Grabacion = (function () {
     var _objetivos = [];        // [{destino, control}] a vigilar
     var _montados = {};         // para no repetir el log de montaje
     var _ciclos = 0;
+    var _casoActual = null;     // numero de caso que el vigilante esta sirviendo
 
     // ---- utilidades --------------------------------------------------------
 
@@ -119,41 +120,28 @@ WIT.Grabacion = (function () {
     function buscarIframe(destino, nombreControl) {
         var nombre = nombreControl || IFRAME_NAME;
 
-        // 1) por el control del formulario
+        // Solo a traves del control de ESTE formulario. Antes habia un respaldo
+        // que recorria document.getElementsByTagName("iframe") buscando por id
+        // o por src: con varios formularios vivos en el mismo DOM (multisesion,
+        // panel lateral), el vigilante de un caso encontraba el iframe de otro
+        // y le escribia su URL, y el vigilante del otro se la devolvia. El
+        // resultado era el iframe recargando en ciclo con numeros de caso
+        // distintos.
         try {
-            var c = _formContext.getControl(nombre);
+            var c = _formContext && _formContext.getControl(nombre);
             if (c && c.getObject) {
                 var o = c.getObject();
                 if (o) {
                     if (o.tagName === "IFRAME") { return o; }
+                    // contenedor del propio control: la busqueda queda acotada a el
                     if (o.querySelector) {
                         var dentro = o.querySelector("iframe");
                         if (dentro) { return dentro; }
                     }
                 }
             }
-        } catch (e) { /* se sigue buscando en el DOM */ }
+        } catch (e) { /* el control no esta disponible todavia */ }
 
-        // 2) por id exacto
-        var porId = document.getElementById(nombre);
-        if (porId && porId.tagName === "IFRAME") { return porId; }
-
-        // 3) por src exacto. NUNCA por coincidencia parcial del id: el nombre
-        // de la pestana completa es prefijo del de la simple
-        // ("IFRAME_grabador" dentro de "IFRAME_grabador_simple"), y una
-        // busqueda por substring devolvia el iframe equivocado, dejando al
-        // otro sin src y por lo tanto en blanco.
-        var todos = document.getElementsByTagName("iframe");
-        for (var i = 0; i < todos.length; i++) {
-            if ((todos[i].getAttribute("src") || "") === destino) {
-                return todos[i];
-            }
-        }
-        for (var j = 0; j < todos.length; j++) {
-            if ((todos[j].getAttribute("id") || "") === nombre) {
-                return todos[j];
-            }
-        }
         return null;
     }
 
@@ -201,9 +189,21 @@ WIT.Grabacion = (function () {
      * getElementById y dos lecturas de atributo) y hace el montaje inmune al
      * momento en que la UCI decida renderizar o re-renderizar la pestana.
      */
+    function detenerVigilante() {
+        if (_vigilante) { clearInterval(_vigilante); _vigilante = null; }
+        _objetivos = [];
+        _montados = {};
+        _ciclos = 0;
+    }
+
     function vigilar() {
         if (_vigilante) { return; }
         _vigilante = setInterval(function () {
+            // si el formulario ya no es el de este caso, no hay nada que vigilar
+            if (!_formContext || numeroDeCaso(_formContext) !== _casoActual) {
+                detenerVigilante();
+                return;
+            }
             var pendientes = 0;
             for (var i = 0; i < _objetivos.length; i++) {
                 if (!asegurarIframe(_objetivos[i].destino, _objetivos[i].control)) {
@@ -335,6 +335,9 @@ WIT.Grabacion = (function () {
     // ---- manejadores de eventos -------------------------------------------
 
     function onLoad(executionContext) {
+        // cada carga empieza de cero: si quedaron objetivos de otro registro, el
+        // vigilante seguiria persiguiendo una URL que ya no corresponde
+        detenerVigilante();
         _formContext = executionContext.getFormContext();
         var tabs = [
             { tab: obtenerTab(_formContext, TAB_NAME),   control: IFRAME_NAME,   simple: false },
@@ -348,6 +351,7 @@ WIT.Grabacion = (function () {
             return;
         }
 
+        _casoActual = numeroCaso;
         escucharMensajes();
 
         tabs.forEach(function (t) {
@@ -373,6 +377,7 @@ WIT.Grabacion = (function () {
             var t = obtenerTab(_formContext, n);
             if (t) { t.setVisible(true); }
         });
+        _casoActual = numeroCaso;
         escucharMensajes();
         montarTodo(_formContext, numeroCaso);
     }
