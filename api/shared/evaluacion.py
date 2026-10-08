@@ -120,8 +120,19 @@ def evaluar(texto, criterios=None):
     deployment = os.environ.get("AOAI_DEPLOYMENT")
     api_version = os.environ.get("AOAI_API_VERSION", "2024-10-21")
     if not (endpoint and key and deployment):
+        # se nombra exactamente lo que falta: "faltan las tres" y "falta una"
+        # son problemas distintos y conviene distinguirlos de inmediato
+        faltan = [n for n, v in (("AOAI_ENDPOINT", endpoint),
+                                 ("AOAI_KEY", key),
+                                 ("AOAI_DEPLOYMENT", deployment)) if not v]
+        presentes = [n for n in ("AOAI_ENDPOINT", "AOAI_KEY", "AOAI_DEPLOYMENT")
+                     if n not in faltan]
         raise EvalConfigError(
-            "Falta configurar Azure OpenAI: AOAI_ENDPOINT, AOAI_KEY y AOAI_DEPLOYMENT.")
+            "Azure OpenAI sin configurar. Falta: %s.%s" % (
+                ", ".join(faltan),
+                (" Presentes: %s." % ", ".join(presentes)) if presentes else
+                " El runtime no ve ninguna de las tres: revise que los cambios en "
+                "las variables de entorno se hayan aplicado."))
 
     numerados = "\n".join("%d. %s" % (i + 1, c) for i, c in enumerate(criterios))
     usuario = ("PUNTOS A VERIFICAR:\n%s\n\nTRANSCRIPCIÓN:\n%s" % (numerados, texto))
