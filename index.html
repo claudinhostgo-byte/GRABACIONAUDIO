@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-11" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-12" />
 </head>
 <body>
 <div class="shell">
@@ -237,6 +237,27 @@
 
     <div id="simpleErr" class="msg"></div>
 
+    <!-- solo con ?modo=vivo: transcripcion y temas mientras se habla -->
+    <div id="vivo">
+      <div class="columnas">
+        <div class="col-texto" id="vivoCol">
+          <h3 class="trh">Conversación en vivo</h3>
+          <div id="vivoAviso" class="banner mock hidden"></div>
+          <div id="vivoTexto" class="vivo-texto" aria-live="polite">
+            <p class="hint">El texto aparece aquí mientras se habla.</p>
+          </div>
+        </div>
+        <aside class="col-panel">
+          <h3 class="trh">Temas tratados</h3>
+          <p class="hint">Se marcan solos cuando la conversación los toca, con la frase que lo respalda.</p>
+          <ol id="vivoTemas" class="criterios"></ol>
+          <div id="vivoMsg" class="msg"></div>
+          <p class="conv-nota">Indicio automático sobre el contenido de la conversación.
+            No evalúa a la persona ni reemplaza una revisión humana.</p>
+        </aside>
+      </div>
+    </div>
+
     <div id="simplePrevia" class="hidden">
       <h3 class="trh">Grabación registrada</h3>
       <audio id="simpleAudio" class="player" controls></audio>
@@ -353,6 +374,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.08-11"></script>
+<script src="assets/app.js?v=2026.10.08-12"></script>
 </body>
 </html>

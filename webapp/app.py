@@ -9,6 +9,7 @@ Rutas:
   GET  /assets/...       estaticos
   POST /api/sas          URL de subida con SAS acotado a un blob
   POST /api/transcribe   transcripcion con Azure AI Speech
+  POST /api/speechtoken  token de Speech para la transcripcion en vivo
   GET  /api/health       diagnostico de configuracion (sin exponer secretos)
 
 Permite probar /api/sas y /api/transcribe contra Azure de verdad sin instalar
@@ -90,6 +91,14 @@ def api_transcribe():
     app.logger.info("Transcrito: %s (%d segmentos, usuario=%s)",
                     result["blobName"], len(result["phrases"]), _principal() or "anonimo")
     return jsonify(result)
+
+
+@app.post("/api/speechtoken")
+def api_speechtoken():
+    try:
+        return jsonify(core.speech_token())
+    except Exception as e:
+        return _fail(e)
 
 
 @app.post("/api/records")

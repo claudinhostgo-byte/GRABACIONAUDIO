@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-11';
+const VERSION = '2026.10.08-12';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -28,6 +28,7 @@ const CFG_NUBE = {
   trMockUrl: '',
   recUrl: '/api/records',
   evalUrl: '/api/evaluar',
+  speechTokenUrl: '/api/speechtoken',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -43,6 +44,7 @@ const CFG_LOCAL = {
   trMockUrl: 'http://localhost:5501/transcribe',
   recUrl: 'http://localhost:5501/records',
   evalUrl: 'http://localhost:5501/evaluar',
+  speechTokenUrl: 'http://localhost:5501/speechtoken',
   locale: 'es-CL',
   diarize: '0'
 };
@@ -121,8 +123,12 @@ function msgConEscape(el, texto, etiqueta){
   el.appendChild(enlaceEscape(etiqueta));
 }
 
-/** Interfaz simplificada: una sola pantalla, todo automatico al detener. */
-const MODO_SIMPLE = new URLSearchParams(location.search).get('modo') === 'simple';
+/** Interfaz simplificada: una sola pantalla, todo automatico al detener.
+    El modo en vivo es la misma pantalla, con transcripcion y temas mientras
+    se habla; al detener sigue el mismo camino que la simple. */
+const MODO = new URLSearchParams(location.search).get('modo');
+const MODO_VIVO   = MODO === 'vivo';
+const MODO_SIMPLE = MODO === 'simple' || MODO_VIVO;
 
 /** Modos compactos de la misma pagina, abiertos como ventana propia. */
 const SOLO = new URLSearchParams(location.search).get('solo');
@@ -641,6 +647,312 @@ async function evaluarGuion(){
   btn.disabled = false;
 }
 
+/* ---------- Revisión en vivo (?modo=vivo) ---------- */
+
+/* Temas que se marcan mientras se habla. Se envian como criterios al mismo
+   /api/evaluar: un tema queda marcado solo si el modelo puede citar la frase
+   que lo respalda, igual que en la revision del guion. */
+const TEMAS_VIVO = [
+  { titulo: 'Créditos',
+    criterio: '¿Se habló de créditos con el cliente (por ejemplo un crédito preaprobado, ' +
+              'su monto, tasa, cuotas o condiciones)?' },
+  { titulo: 'Beneficios',
+    criterio: '¿Se habló de beneficios o ventajas disponibles para el cliente?' }
+];
+
+/* Version fija del SDK de voz para el navegador. Se carga solo en este modo. */
+const SDK_VOZ = 'https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.40.0' +
+                '/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js';
+
+const VIVO_PAUSA_MS   = 6000;    // separacion minima entre revisiones
+const VIVO_VENTANA    = 6000;    // caracteres finales que se revisan cada vez
+const VIVO_TOKEN_MS   = 9 * 60 * 1000;   // el token vence a los 10 minutos
+const RANGO = { pend: 0, no: 0, parcial: 1, si: 2 };
+
+const V = {
+  gen: 0,                 // cambia al reiniciar: descarta respuestas de una sesion anterior
+  activo: false, rec: null, simulador: 0, tokenTimer: 0,
+  frases: [], parcial: '', t0: 0,
+  temas: [],              // [{cumple, evidencia}] por tema, solo sube de nivel
+  timer: 0, enCurso: false, pendiente: false, ultima: 0, revisadoHasta: 0
+};
+
+function vivoReiniciar(){
+  V.gen++;
+  V.frases = []; V.parcial = ''; V.ultima = 0; V.revisadoHasta = 0;
+  V.pendiente = false; V.enCurso = false;
+  clearTimeout(V.timer);
+  V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
+  $('vivoCol').classList.remove('hidden');
+  $('vivoAviso').classList.add('hidden');
+  setMsg($('vivoMsg'), '');
+  pintarVivoTexto();
+  pintarTemasVivo(-1);
+}
+
+function pintarVivoTexto(){
+  const caja = $('vivoTexto');
+  caja.innerHTML = '';
+  if (!V.frases.length && !V.parcial){
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = V.activo ? 'Escuchando…' : 'El texto aparece aquí mientras se habla.';
+    caja.appendChild(p);
+    return;
+  }
+  V.frases.forEach((f) => {
+    const p = document.createElement('p');
+    const h = document.createElement('span');
+    h.className = 'hora';
+    h.textContent = fmtTime(f.ms);
+    p.appendChild(h);
+    p.appendChild(document.createTextNode(f.texto));
+    caja.appendChild(p);
+  });
+  if (V.parcial){
+    const p = document.createElement('p');
+    p.className = 'parcial';
+    p.textContent = V.parcial + '…';
+    caja.appendChild(p);
+  }
+  caja.scrollTop = caja.scrollHeight;
+}
+
+/** `recien` resalta el tema que acaba de marcarse. */
+function pintarTemasVivo(recien){
+  const ol = $('vivoTemas');
+  ol.innerHTML = '';
+  TEMAS_VIVO.forEach((tema, i) => {
+    const r = V.temas[i] || { cumple: 'pend' };
+    // en vivo un "no" solo significa "todavia no": se muestra como pendiente
+    const estado = r.cumple === 'no' ? 'pend' : r.cumple;
+
+    const li = document.createElement('li');
+    if (i === recien) li.className = 'recien';
+    const cab = document.createElement('div');
+    cab.className = 'crit-cab';
+    const marca = document.createElement('span');
+    marca.className = 'crit-marca ' + estado;
+    marca.textContent = MARCAS[estado];
+    marca.title = { si: 'Se habló del tema', parcial: 'Se mencionó de pasada',
+                    pend: 'Aún no aparece' }[estado];
+    cab.appendChild(marca);
+    const txt = document.createElement('span');
+    txt.className = 'crit-texto';
+    txt.textContent = tema.titulo;
+    cab.appendChild(txt);
+    li.appendChild(cab);
+
+    if (r.evidencia){
+      const ev = document.createElement('div');
+      ev.className = 'crit-evidencia';
+      ev.textContent = '«' + r.evidencia + '»';
+      li.appendChild(ev);
+    }
+    ol.appendChild(li);
+  });
+}
+
+function vivoFrase(texto){
+  texto = String(texto || '').trim();
+  if (!texto) return;
+  V.frases.push({ texto, ms: performance.now() - V.t0 });
+  V.parcial = '';
+  pintarVivoTexto();
+  vivoProgramar();
+}
+
+/* Revisiones espaciadas: a lo mas una en curso y una cada VIVO_PAUSA_MS. Lo
+   que llegue mientras tanto se junta en la siguiente. */
+function vivoProgramar(){
+  if (V.temas.every((t) => t.cumple === 'si')) return;
+  if (V.enCurso){ V.pendiente = true; return; }
+  clearTimeout(V.timer);
+  V.timer = setTimeout(vivoRevisar, Math.max(0, V.ultima + VIVO_PAUSA_MS - Date.now()));
+}
+
+async function vivoRevisar(){
+  const url = S.cfg.evalUrl;
+  const pendientes = TEMAS_VIVO.map((t, i) => i).filter((i) => V.temas[i].cumple !== 'si');
+  if (!url || !pendientes.length || V.revisadoHasta >= V.frases.length) return;
+
+  // solo el tramo final: lo anterior ya se reviso, y asi el costo de cada
+  // llamada no crece con el largo de la conversacion
+  const texto = V.frases.map((f) => f.texto).join(' ').slice(-VIVO_VENTANA);
+  const gen = V.gen;
+  const hasta = V.frases.length;
+  V.enCurso = true; V.ultima = Date.now();
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texto, vivo: true, recordId: S.id,
+                             criterios: pendientes.map((i) => TEMAS_VIVO[i].criterio) })
+    });
+    const txt = await res.text();
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+    if (gen !== V.gen) return;          // la sesion se reinicio mientras tanto
+
+    V.revisadoHasta = hasta;
+    let recien = -1;
+    (d.resultados || []).forEach((r, k) => {
+      const i = pendientes[k];
+      if (i == null) return;
+      // un tema marcado no se desmarca: la frase ya se dijo
+      if ((RANGO[r.cumple] || 0) > (RANGO[V.temas[i].cumple] || 0)){
+        V.temas[i] = { cumple: r.cumple, evidencia: r.evidencia };
+        recien = i;
+      }
+    });
+    pintarTemasVivo(recien);
+    if (d.mock) setMsg($('vivoMsg'), 'Revisión simulada por palabra clave.', 'bad');
+    else setMsg($('vivoMsg'), '');
+  } catch (e){
+    if (gen === V.gen) setMsg($('vivoMsg'), 'No se pudo revisar: ' + e.message, 'bad');
+  } finally {
+    if (gen === V.gen){
+      V.enCurso = false;
+      if (V.pendiente){ V.pendiente = false; vivoProgramar(); }
+    }
+  }
+}
+
+function cargarSdkVoz(){
+  if (window.SpeechSDK) return Promise.resolve(window.SpeechSDK);
+  return new Promise((ok, mal) => {
+    const s = document.createElement('script');
+    s.src = SDK_VOZ;
+    s.onload  = () => window.SpeechSDK ? ok(window.SpeechSDK)
+                                       : mal(new Error('el SDK de voz no se inicializó'));
+    s.onerror = () => mal(new Error('no se pudo descargar el SDK de voz'));
+    document.head.appendChild(s);
+  });
+}
+
+async function pedirTokenVoz(){
+  const res = await fetch(S.cfg.speechTokenUrl, { method: 'POST' });
+  const txt = await res.text();
+  let d;
+  try { d = JSON.parse(txt); }
+  catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
+  if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+  return d;
+}
+
+/** Arranca junto con la grabacion. Si falla, la grabacion sigue igual. */
+async function vivoIniciar(){
+  vivoReiniciar();
+  V.activo = true; V.t0 = performance.now();
+  pintarVivoTexto();
+  const gen = V.gen;
+
+  if (!S.cfg.speechTokenUrl){
+    setMsg($('vivoMsg'), 'Falta el endpoint del token de voz: la revisión en vivo no está disponible.', 'bad');
+    return;
+  }
+  try {
+    const tk = await pedirTokenVoz();
+    if (gen !== V.gen || !V.activo) return;
+    if (tk.mock){ vivoSimular(); return; }
+
+    const sdk = await cargarSdkVoz();
+    if (gen !== V.gen || !V.activo) return;
+
+    const cfg = sdk.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
+    cfg.speechRecognitionLanguage = S.cfg.locale || 'es-CL';
+    // mismo microfono que la grabacion
+    const mic = micSeleccionado();
+    const audio = mic ? sdk.AudioConfig.fromMicrophoneInput(mic)
+                      : sdk.AudioConfig.fromDefaultMicrophoneInput();
+    const rec = new sdk.SpeechRecognizer(cfg, audio);
+
+    if (tk.phrases && tk.phrases.length){
+      const lista = sdk.PhraseListGrammar.fromRecognizer(rec);
+      tk.phrases.forEach((f) => lista.addPhrase(f));
+    }
+
+    rec.recognizing = (s, e) => { V.parcial = e.result.text; pintarVivoTexto(); };
+    rec.recognized  = (s, e) => {
+      if (e.result.reason === sdk.ResultReason.RecognizedSpeech) vivoFrase(e.result.text);
+    };
+    rec.canceled = (s, e) => {
+      if (e.reason === sdk.CancellationReason.Error){
+        setMsg($('vivoMsg'), 'La transcripción en vivo se interrumpió: ' + e.errorDetails +
+          '. La grabación continúa.', 'bad');
+      }
+    };
+
+    V.rec = rec;
+    rec.startContinuousRecognitionAsync(() => {},
+      (err) => setMsg($('vivoMsg'), 'No se pudo iniciar la transcripción en vivo: ' + err +
+        '. La grabación continúa.', 'bad'));
+
+    // se renueva antes de que venza, sin cortar el reconocimiento
+    V.tokenTimer = setInterval(async () => {
+      try { rec.authorizationToken = (await pedirTokenVoz()).token; }
+      catch (e){ console.warn('No se pudo renovar el token de voz', e); }
+    }, VIVO_TOKEN_MS);
+  } catch (e){
+    if (gen === V.gen){
+      setMsg($('vivoMsg'), 'La transcripción en vivo no está disponible (' + e.message +
+        '). La grabación continúa y se transcribe al detener.', 'bad');
+    }
+  }
+}
+
+/* Sin Azure: conversacion de relleno para ver como se marcan los temas. */
+const GUION_SIMULADO = [
+  'Buenos días, ¿en qué le puedo ayudar?',
+  'Hola, quería consultar el saldo de mi cuenta.',
+  'Claro, lo reviso. Por cierto, usted tiene un crédito preaprobado de consumo.',
+  'No sabía, ¿y de cuánto sería?',
+  'Se lo detallo enseguida. También tiene beneficios por ser socio en salud y educación.',
+  'Perfecto, muchas gracias.'
+];
+
+function vivoSimular(){
+  $('vivoAviso').textContent = 'Transcripción en vivo SIMULADA: es texto de relleno, ' +
+    'no lo que se está diciendo.';
+  $('vivoAviso').classList.remove('hidden');
+  let i = 0, letras = 0;
+  V.simulador = setInterval(() => {
+    const frase = GUION_SIMULADO[i];
+    if (!frase){ clearInterval(V.simulador); V.simulador = 0; return; }
+    letras += 12;
+    if (letras < frase.length){
+      V.parcial = frase.slice(0, letras);
+      pintarVivoTexto();
+    } else {
+      vivoFrase(frase);
+      i++; letras = 0;
+    }
+  }, 350);
+}
+
+/** Corta el reconocimiento y hace una ultima revision con lo que quede. */
+function vivoDetener(){
+  if (!V.activo) return;
+  V.activo = false;
+  clearInterval(V.simulador); V.simulador = 0;
+  clearInterval(V.tokenTimer); V.tokenTimer = 0;
+  const rec = V.rec;
+  V.rec = null;
+  // con el SDK, la frase en curso llega igual como reconocida al detener;
+  // en el simulador hay que cerrarla a mano
+  if (!rec && V.parcial) vivoFrase(V.parcial);
+  if (rec){
+    rec.stopContinuousRecognitionAsync(() => rec.close(), () => rec.close());
+  }
+  clearTimeout(V.timer);
+  if (V.enCurso) V.pendiente = true;
+  else { V.ultima = 0; vivoProgramar(); }
+  pintarVivoTexto();
+}
+
 /* ---------- Clip de evidencia ---------- */
 
 const CLIP_MIMES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus',
@@ -1140,7 +1452,7 @@ function bar(ctx, x, mid, bw, bh, live, p){
   g.addColorStop(1,   live ? p.a : p.idle);
   ctx.fillStyle = g;
   ctx.beginPath();
-  const r = Math.min(bw / 2, 3);
+  const r = Math.max(0, Math.min(bw / 2, 3));   // canvas muy angosto: bw puede ser negativo
   if (ctx.roundRect) ctx.roundRect(x, mid - bh / 2, bw, bh, r);
   else ctx.rect(x, mid - bh / 2, bw, bh);
   ctx.fill();
@@ -1698,12 +2010,14 @@ async function simpleGrabar(){
   $('simplePers').disabled = true;
   $('simpleMic').disabled = true;
   await startRec();
+  if (MODO_VIVO && S.rec && S.rec.state === 'recording') vivoIniciar();
 }
 
 function simpleDetener(){
   $('simpleStop').disabled = true;
   $('simpleDot').classList.add('hidden');
   simpleEstado('Procesando el audio…', true);
+  if (MODO_VIVO) vivoDetener();
   stopRec();                       // al terminar dispara continuarSimple()
 }
 
@@ -1736,6 +2050,9 @@ async function continuarSimple(){
   simpleEstado('Listo', false);
   $('simpleRec').disabled = false;
   renderSimple(S.tr);
+  // la transcripcion final por hablante reemplaza al texto en vivo; los
+  // temas marcados quedan a la vista
+  if (MODO_VIVO) $('vivoCol').classList.add('hidden');
 }
 
 /** Muestra la transcripción como una conversación, por hablante. */
@@ -1841,6 +2158,8 @@ function bloquearSimplePorExistente(bloquear){
   // un boton que no hace nada confunde mas que no estar
   const otra = $('simpleOtra');
   if (otra) otra.classList.toggle('hidden', bloquear);
+  // en un caso ya grabado no hay nada que escuchar en vivo
+  if (MODO_VIVO) $('vivo').classList.toggle('hidden', bloquear);
 }
 
 /** Al abrir el caso, si ya hay grabación se muestra para escuchar y leer. */
@@ -1985,6 +2304,11 @@ function init(){
     document.body.classList.add('modo-simple');
     document.title = 'Grabación';
   }
+  if (MODO_VIVO){
+    document.body.classList.add('modo-vivo');
+    document.title = 'Grabación en vivo';
+    vivoReiniciar();
+  }
 
   // dentro de un marco sin cámara delegada, la ventana aparte es el camino:
   // conserva el número de caso y avisa de vuelta al terminar
@@ -2045,6 +2369,7 @@ function init(){
     $('simpleOut').classList.add('hidden');
     setMsg($('simpleErr'), '');
     $('simpleTimer').textContent = '00:00';
+    if (MODO_VIVO) vivoReiniciar();
     simpleEstado('Listo para grabar', false);
     $('simpleRec').disabled = false;
   };

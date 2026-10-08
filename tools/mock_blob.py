@@ -79,6 +79,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._evaluar()
         if ruta == "/records":
             return self._records()
+        if ruta == "/speechtoken":
+            # sin token: la pagina entiende que debe simular el reconocimiento
+            return self._responder({"mock": True})
         if ruta != "/transcribe":
             return self._fail(404, "ResourceNotFound", "Ruta no soportada.")
         return self._transcribe()
@@ -96,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
             "¿El funcionario explicó los beneficios?",
             "¿Se informó sobre Coopeuch Educa?",
         ]
+        if req.get("vivo"):
+            return self._evaluar_vivo(criterios, req.get("texto") or "")
         estados = ["si", "parcial", "no"]
         resultados = []
         for i, c in enumerate(criterios):
@@ -111,6 +116,38 @@ class Handler(BaseHTTPRequestHandler):
         payload = {"mock": True, "resultados": resultados, "modelo": "simulador",
                    "aviso": "Resultado SIMULADO: no proviene de ningun analisis real."}
         print("  POST /evaluar  %d puntos simulados" % len(resultados), flush=True)
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _evaluar_vivo(self, criterios, texto):
+        """Simulador de la revision en vivo: busca una palabra clave por punto.
+
+        No entiende nada; sirve para ver como se marcan los temas a medida que
+        avanza la conversacion simulada.
+        """
+        claves = (("crédit", "credit"), ("beneficio",))
+        frases = [f.strip() for f in texto.replace("?", ".").split(".") if f.strip()]
+        resultados = []
+        for i, c in enumerate(criterios):
+            grupo = next((g for g in claves if any(k in c.lower() for k in g)), ())
+            cita = next((f for f in frases if any(k in f.lower() for k in grupo)), None)
+            resultados.append({
+                "indice": i + 1,
+                "criterio": c,
+                "cumple": "si" if cita else "no",
+                "evidencia": cita,
+                "justificacion": "Resultado simulado por palabra clave.",
+            })
+        print("  POST /evaluar  vivo, %d puntos simulados" % len(resultados), flush=True)
+        return self._responder({"mock": True, "resultados": resultados, "modelo": "simulador",
+                                "aviso": "Resultado SIMULADO: no proviene de ningun analisis real."})
+
+    def _responder(self, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(200)
         self._cors()

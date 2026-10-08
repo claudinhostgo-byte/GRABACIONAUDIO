@@ -418,3 +418,23 @@ body.modo-simple .card{margin-bottom:0}
 .crit-evidencia{margin-top:7px;padding-left:9px;border-left:2px solid var(--line);
   font-size:11.5px;color:var(--ink2);line-height:1.5;font-style:italic}
 .crit-just{margin-top:5px;font-size:11px;color:var(--ink2)}
+
+/* ---------- modo en vivo (?modo=vivo) ----------
+   Misma pantalla simple, con la conversacion y los temas mientras se habla. */
+#vivo{display:none}
+body.modo-vivo #vivo{display:block;margin-top:14px}
+body.modo-vivo #vivo.hidden{display:none}
+body.modo-vivo .shell{max-width:1040px}
+.vivo-texto{margin-top:8px;padding:12px 14px;min-height:140px;max-height:360px;overflow-y:auto;
+  background:var(--viz-bg);border:1px solid var(--line);border-radius:var(--r-lg);
+  font-size:13px;line-height:1.55}
+.vivo-texto p{margin:0 0 6px}
+.vivo-texto .hint{margin:0}
+.vivo-texto .parcial{color:var(--ink2);font-style:italic}
+.vivo-texto .hora{font-size:11px;color:var(--ink3);margin-right:6px;font-variant-numeric:tabular-nums}
+#vivoTemas .crit-texto{font-size:14px;font-weight:600}
+#vivoTemas li.recien{animation:recien 1.6s ease-out}
+@keyframes recien{from{box-shadow:0 0 0 3px var(--ok)}to{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion: reduce){#vivoTemas li.recien{animation:none}}
+/* al terminar, sin el texto en vivo, los temas ocupan el ancho completo */
+#vivoCol.hidden + .col-panel{flex:1 1 auto}

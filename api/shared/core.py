@@ -296,6 +296,38 @@ def vocabulario(extra=None):
     return unicas[:MAX_FRASES]
 
 
+def speech_token():
+    """Token de corta duracion para reconocimiento en vivo desde el navegador.
+
+    El SDK de voz del navegador necesita credenciales para abrir su conexion.
+    Entregarle SPEECH_KEY la dejaria expuesta; el token vence a los 10 minutos
+    y solo sirve para Speech, asi que es lo que se le pasa. La pagina lo
+    renueva antes de que venza.
+    """
+    key = os.environ.get("SPEECH_KEY")
+    region = os.environ.get("SPEECH_REGION")
+    if not key or not region:
+        raise ConfigError("Faltan SPEECH_KEY / SPEECH_REGION.")
+
+    url = "https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken".format(region)
+    try:
+        r = requests.post(url, headers={"Ocp-Apim-Subscription-Key": key}, timeout=15)
+    except requests.RequestException as e:
+        raise UpstreamError("Fallo al pedir el token de Azure AI Speech: %s" % e)
+    if r.status_code >= 300:
+        raise UpstreamError("Azure AI Speech respondio %d al pedir el token" % r.status_code,
+                            detail=r.text[:500])
+
+    return {
+        "mock": False,
+        "token": r.text,
+        "region": region,
+        "expiresInSeconds": 600,
+        # el mismo vocabulario que usa la transcripcion final
+        "phrases": vocabulario(),
+    }
+
+
 def transcribe_blob(blob_name, locales=None, diarize=0, phrases=None):
     """Descarga el blob y lo transcribe con Fast Transcription de Azure AI Speech."""
     key = os.environ.get("SPEECH_KEY")

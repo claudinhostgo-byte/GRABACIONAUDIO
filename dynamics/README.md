@@ -77,16 +77,23 @@ Es el error más común al montar esto: todo parece bien configurado y la pesta�
 
 ### 3. Pestañas e iframes
 
-El script soporta **dos pestañas**, ambas opcionales por separado:
+El script soporta **tres pestañas**, todas opcionales por separado:
 
 | Pestaña | Control IFRAME | Interfaz |
 |---|---|---|
 | `tab_grabacion` | `IFRAME_grabador` | completa: pasos, clip de evidencia, configuración |
 | `tab_grabacion_simple` | `IFRAME_grabador_simple` | simplificada: cuántos hablan, grabar, detener |
+| `tab_grabacion_vivo` | `IFRAME_grabador_vivo` | simplificada + transcripción y temas en vivo |
 
 La simplificada carga la misma página con `&modo=simple`: al detener sube y transcribe sola, y
-muestra el texto separado por hablante. Si solo se crea una de las dos, la otra se ignora sin
-error.
+muestra el texto separado por hablante. Si solo se crea una, las otras se ignoran sin error.
+
+La pestaña en vivo carga `&modo=vivo`. Mientras se graba muestra la conversación transcrita en
+tiempo real y marca con ✓ los temas **Créditos** y **Beneficios** apenas se mencionan, con la
+frase que lo respalda. Un tema marcado no se desmarca. Al detener sigue el mismo camino que la
+simplificada (sube, transcribe por hablante y deja la revisión del guion disponible). Requiere
+Azure AI Speech (`SPEECH_KEY`, `SPEECH_REGION`) y Azure OpenAI (`AOAI_*`), los mismos que ya
+usan la transcripción y la revisión del guion.
 
 Repetir los pasos de abajo para cada pestaña que se quiera, cambiando nombre de pestaña y de
 control según la tabla.

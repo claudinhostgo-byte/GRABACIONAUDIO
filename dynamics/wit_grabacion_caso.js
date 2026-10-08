@@ -1,10 +1,12 @@
 /*
  * Recurso web JavaScript para el formulario de Caso (incident).
  *
- * 1. Muestra el grabador en una o dos pestanas del formulario, pasandole el
+ * 1. Muestra el grabador en hasta tres pestanas del formulario, pasandole el
  *    numero de caso como parametro de indexacion:
  *      - tab_grabacion        -> interfaz completa
  *      - tab_grabacion_simple -> interfaz simplificada (?modo=simple), opcional
+ *      - tab_grabacion_vivo   -> simplificada con transcripcion y temas en
+ *                                vivo (?modo=vivo), opcional
  * 2. Recibe la transcripcion de vuelta y la agrega a la Descripcion del caso.
  *
  * Reglas de negocio:
@@ -45,7 +47,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.08-11";
+    var VERSION      = "2026.10.08-12";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -56,6 +58,11 @@ WIT.Grabacion = (function () {
     // detener sube y transcribe sola, y muestra el texto por hablante.
     var IFRAME_SIMPLE = "IFRAME_grabador_simple";
     var TAB_SIMPLE    = "tab_grabacion_simple";
+
+    // Pestana en vivo: la simplificada, mas la conversacion transcrita
+    // mientras se habla y los temas (creditos, beneficios) que se marcan solos.
+    var IFRAME_VIVO   = "IFRAME_grabador_vivo";
+    var TAB_VIVO      = "tab_grabacion_vivo";
     var CAMPO_NUMERO = "ticketnumber";
     var CAMPO_DESTINO = "description";
 
@@ -89,10 +96,11 @@ WIT.Grabacion = (function () {
         return String(valor).trim() || null;
     }
 
-    function urlGrabador(numeroCaso, simple) {
+    /** modo: null (completa), "simple" o "vivo". */
+    function urlGrabador(numeroCaso, modo) {
         return BASE_URL + "/?id=" + encodeURIComponent(numeroCaso) +
                "&lock=1&parent=" + encodeURIComponent(window.location.origin) +
-               (simple ? "&modo=simple" : "") +
+               (modo ? "&modo=" + encodeURIComponent(modo) : "") +
                "&v=" + encodeURIComponent(VERSION);
     }
 
@@ -245,7 +253,7 @@ WIT.Grabacion = (function () {
         }, 1200);
     }
 
-    function montar(formContext, numeroCaso, nombreControl, simple) {
+    function montar(formContext, numeroCaso, nombreControl, modo) {
         var nombre = nombreControl || IFRAME_NAME;
         var control = formContext.getControl(nombre);
         if (!control) {
@@ -253,7 +261,7 @@ WIT.Grabacion = (function () {
             return false;
         }
 
-        var destino = urlGrabador(numeroCaso, simple);
+        var destino = urlGrabador(numeroCaso, modo);
 
         // via soportada: deja la URL registrada en el control
         try { control.setSrc(destino); } catch (e) {
@@ -277,10 +285,11 @@ WIT.Grabacion = (function () {
         return true;
     }
 
-    /** Monta las dos pestanas: la completa y la simplificada, si existen. */
+    /** Monta las pestanas que existan: completa, simplificada y en vivo. */
     function montarTodo(formContext, numeroCaso) {
-        montar(formContext, numeroCaso, IFRAME_NAME, false);
-        montar(formContext, numeroCaso, IFRAME_SIMPLE, true);
+        montar(formContext, numeroCaso, IFRAME_NAME, null);
+        montar(formContext, numeroCaso, IFRAME_SIMPLE, "simple");
+        montar(formContext, numeroCaso, IFRAME_VIVO, "vivo");
     }
 
     // ---- transcripcion de vuelta ------------------------------------------
@@ -368,8 +377,9 @@ WIT.Grabacion = (function () {
         detenerVigilante();
         _formContext = executionContext.getFormContext();
         var tabs = [
-            { tab: obtenerTab(_formContext, TAB_NAME),   control: IFRAME_NAME,   simple: false },
-            { tab: obtenerTab(_formContext, TAB_SIMPLE), control: IFRAME_SIMPLE, simple: true }
+            { tab: obtenerTab(_formContext, TAB_NAME),   control: IFRAME_NAME,   modo: null },
+            { tab: obtenerTab(_formContext, TAB_SIMPLE), control: IFRAME_SIMPLE, modo: "simple" },
+            { tab: obtenerTab(_formContext, TAB_VIVO),   control: IFRAME_VIVO,   modo: "vivo" }
         ];
         var esCreacion = _formContext.ui.getFormType() === FORM_TYPE_CREATE;
         var numeroCaso = numeroDeCaso(_formContext);
@@ -385,11 +395,11 @@ WIT.Grabacion = (function () {
         tabs.forEach(function (t) {
             if (!t.tab) { return; }
             t.tab.setVisible(true);
-            montar(_formContext, numeroCaso, t.control, t.simple);
+            montar(_formContext, numeroCaso, t.control, t.modo);
             if (t.tab.addTabStateChange) {
                 t.tab.addTabStateChange(function () {
                     if (t.tab.getDisplayState() === "expanded") {
-                        montar(_formContext, numeroCaso, t.control, t.simple);
+                        montar(_formContext, numeroCaso, t.control, t.modo);
                     }
                 });
             }
@@ -401,7 +411,7 @@ WIT.Grabacion = (function () {
         if (_formContext.ui.getFormType() === FORM_TYPE_CREATE) { return; }
         var numeroCaso = numeroDeCaso(_formContext);
         if (!numeroCaso) { return; }
-        [TAB_NAME, TAB_SIMPLE].forEach(function (n) {
+        [TAB_NAME, TAB_SIMPLE, TAB_VIVO].forEach(function (n) {
             var t = obtenerTab(_formContext, n);
             if (t) { t.setVisible(true); }
         });
@@ -419,7 +429,7 @@ WIT.Grabacion = (function () {
             });
             return;
         }
-        Xrm.Navigation.openUrl(urlGrabador(numeroCaso, false));
+        Xrm.Navigation.openUrl(urlGrabador(numeroCaso, null));
     }
 
     return {

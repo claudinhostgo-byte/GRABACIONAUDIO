@@ -21,6 +21,8 @@ api/                             managed functions de SWA (Python, modelo v1)
   shared/core.py                 lógica compartida: SAS y Azure AI Speech
   sas/                           POST /api/sas
   transcribe/                    POST /api/transcribe
+  speechtoken/                   POST /api/speechtoken (token de Speech para el modo en vivo)
+  evaluar/                       POST /api/evaluar (revisión del guion y temas en vivo)
   host.json, requirements.txt
 webapp/app.py                    servidor local de desarrollo (Flask, mismo origen)
 tools/mock_blob.py               emulador local de Blob + simulador de transcripción
