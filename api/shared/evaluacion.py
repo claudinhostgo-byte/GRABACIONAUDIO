@@ -28,7 +28,7 @@ MAX_CRITERIOS = 20
 MAX_TEXTO = 60000
 
 CRITERIOS_POR_DEFECTO = [
-    "¿El funcionario ofreció créditos?",
+    "¿Sabía ud. que tiene un crédito preaprobado?",
     "¿El funcionario explicó los beneficios?",
     "¿Se informó sobre Coopeuch Educa?",
 ]

@@ -92,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(400, "InvalidInput", "JSON invalido.")
 
         criterios = req.get("criterios") or [
-            "¿El funcionario ofreció créditos?",
+            "¿Sabía ud. que tiene un crédito preaprobado?",
             "¿El funcionario explicó los beneficios?",
             "¿Se informó sobre Coopeuch Educa?",
         ]

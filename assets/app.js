@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-10';
+const VERSION = '2026.10.08-11';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -547,7 +547,7 @@ async function transcribirExistente(it, zona, btn){
 /* Puntos a verificar. Viven aquí para la POC; el backend acepta la lista en la
    petición, de modo que puedan venir de configuración sin tocar la página. */
 const CRITERIOS = [
-  '¿El funcionario ofreció créditos?',
+  '¿Sabía ud. que tiene un crédito preaprobado?',
   '¿El funcionario explicó los beneficios?',
   '¿Se informó sobre Coopeuch Educa?'
 ];
