@@ -45,7 +45,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.08-2";
+    var VERSION      = "2026.10.08-3";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -168,23 +168,15 @@ WIT.Grabacion = (function () {
 
         var src = el.getAttribute("src") || "";
         var faltaAllow = el.getAttribute("allow") !== ALLOW;
-        var yaEsDelGrabador = src.indexOf(BASE_URL) === 0;
+        var faltaSrc = src !== destino;
 
-        // Regla que cierra el ciclo por construccion: el vigilante NUNCA pisa
-        // una URL que ya apunta al grabador, aunque muestre otro numero de
-        // caso. Si dos formularios comparten el DOM, pisarla hace que cada uno
-        // se la devuelva al otro indefinidamente. Solo el montaje explicito
-        // (onLoad, onSave, abrir la pestana) puede forzar el cambio.
-        if (!forzar && yaEsDelGrabador && !faltaAllow) { return true; }
-        if (!forzar && yaEsDelGrabador && faltaAllow) {
-            el.setAttribute("allow", ALLOW);   // sin recargar: evita el ciclo
-            return true;
-        }
+        if (!faltaAllow && !faltaSrc) { return true; }   // ya esta como debe
 
-        if (src === destino && !faltaAllow) { return true; }   // ya estaba bien
-
-        // Tope duro por control: si algo externo sigue reescribiendo el src,
-        // el script se rinde en vez de pelear para siempre.
+        // El tope por control es la red de seguridad contra cualquier ciclo: si
+        // algo externo sigue reescribiendo el src, el script avisa y se rinde
+        // en vez de pelear indefinidamente. Lo que evita el ciclo entre dos
+        // formularios es que buscarIframe solo resuelve el iframe del control
+        // de ESTE formulario, nunca uno encontrado recorriendo el documento.
         var n = _escrituras[nombreControl] || 0;
         if (n >= MAX_ESCRITURAS) {
             if (n === MAX_ESCRITURAS) {
@@ -197,12 +189,22 @@ WIT.Grabacion = (function () {
         }
         _escrituras[nombreControl] = n + 1;
 
-        if (faltaAllow) { el.setAttribute("allow", ALLOW); }
-        el.setAttribute("src", destino);
+        // El atributo allow SOLO aplica en una navegacion nueva: si falta, hay
+        // que recargar el iframe o el microfono queda bloqueado aunque el
+        // atributo figure en el elemento.
+        if (faltaAllow) {
+            el.setAttribute("allow", ALLOW);
+            el.setAttribute("src", "about:blank");
+            setTimeout(function () {
+                try { el.setAttribute("src", destino); } catch (e) {}
+            }, 50);
+        } else {
+            el.setAttribute("src", destino);
+        }
 
-        console.log("WIT.Grabacion: " + nombreControl + " -> src asignado (" +
-                    (n + 1) + "/" + MAX_ESCRITURAS + ")" +
-                    (src ? " | anterior: " + src.slice(0, 80) : ""));
+        console.log("WIT.Grabacion: " + nombreControl + " montado (" + (n + 1) + "/" +
+                    MAX_ESCRITURAS + ")" + (faltaAllow ? " con recarga para aplicar allow" : "") +
+                    (src ? " | anterior: " + src.slice(0, 70) : ""));
         return true;
     }
 
