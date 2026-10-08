@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-6';
+const VERSION = '2026.10.08-7';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -53,7 +53,7 @@ const S = {
   ac: null, analyser: null, srcNode: null, raf: 0,
   t0: 0, accMs: 0, tick: 0,
   blob: null, mime: '', durMs: 0, blobName: '',
-  uploaded: null, tr: null, segEls: [], activeSeg: -1,
+  uploaded: null, tr: null, segEls: [], activeSeg: -1, previa: null,
   cam: { stream: null, rec: null, chunks: [], blob: null, mime: '', durMs: 0,
          t0: 0, tick: 0, tope: 60000, blobName: '' },
   cfg: Object.assign({}, CFG_DEFAULT)
@@ -328,6 +328,7 @@ async function buscarExistentes(){
     if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
 
     if (MODO_SIMPLE){
+      // simpleMostrarPrevia decide si el caso queda en modo consulta
       simpleMostrarPrevia(d);
       desbloquearGrabacion();
       return;
@@ -1722,14 +1723,96 @@ function renderSimple(t){
   $('simpleOut').classList.remove('hidden');
 }
 
-/** Al abrir el caso, si ya hay transcripción guardada se muestra de una vez. */
+/**
+ * Un caso con grabación queda en modo consulta: se escucha y se lee, no se
+ * vuelve a grabar. Evita duplicar la conversación del mismo caso por error.
+ */
+function bloquearSimplePorExistente(bloquear){
+  ['simpleRec', 'simpleStop', 'simpleMic', 'simplePers'].forEach((k) => {
+    const el = $(k);
+    if (el) el.disabled = bloquear;
+  });
+  // un boton que no hace nada confunde mas que no estar
+  const otra = $('simpleOtra');
+  if (otra) otra.classList.toggle('hidden', bloquear);
+}
+
+/** Al abrir el caso, si ya hay grabación se muestra para escuchar y leer. */
 function simpleMostrarPrevia(d){
-  const conTexto = (d.items || []).find((it) => !esClip(it) && it.transcript && it.transcript.text);
-  if (!conTexto) return;
-  const t = conTexto.transcript;
-  // lo almacenado trae offsetMilliseconds; la UI trabaja con la forma normalizada
-  renderSimple({ text: t.text, phrases: normalizePhrases(t), mock: !!t.mock });
-  simpleEstado('Ya existe una grabación para este caso', false);
+  const audios = (d.items || []).filter((it) => !esClip(it));
+  if (!audios.length){
+    bloquearSimplePorExistente(false);
+    $('simplePrevia').classList.add('hidden');
+    return;
+  }
+
+  const it = audios[0];                       // el listado llega del mas reciente al mas antiguo
+  S.previa = it;
+
+  const src = it.url || it.audioUrl;
+  if (src) $('simpleAudio').src = src;
+
+  $('simplePreviaMeta').innerHTML = '';
+  [
+    it.createdAt ? new Date(it.createdAt).toLocaleString('es-CL') : null,
+    it.durationMs ? 'Duración: ' + fmtTime(it.durationMs) : null,
+    it.sizeBytes ? fmtSize(it.sizeBytes) : null
+  ].filter(Boolean).forEach((x) => {
+    const sp = document.createElement('span'); sp.textContent = x;
+    $('simplePreviaMeta').appendChild(sp);
+  });
+  $('simplePrevia').classList.remove('hidden');
+
+  bloquearSimplePorExistente(true);
+  simpleEstado('Ya existe una grabación para este caso: solo lectura', false);
+
+  const t = it.transcript;
+  if (t && t.text){
+    $('simpleTr').classList.add('hidden');
+    // lo almacenado trae offsetMilliseconds; la UI usa la forma normalizada
+    renderSimple({ text: t.text, phrases: normalizePhrases(t), mock: !!t.mock });
+  } else {
+    $('simpleOut').classList.add('hidden');
+    $('simpleTr').classList.remove('hidden');
+    $('simpleTr').disabled = false;
+    setMsg($('simpleErr'), 'La grabación está guardada pero todavía no tiene transcripción.');
+  }
+}
+
+/** Transcribe la grabación ya existente, sin volver a grabarla. */
+async function simpleTranscribirPrevia(){
+  if (!S.previa) return;
+  const btn = $('simpleTr');
+  btn.disabled = true;
+  setMsg($('simpleErr'), '');
+  simpleEstado('Transcribiendo con Azure AI Speech…', true);
+  try {
+    const res = await fetch(trEndpoint(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blobName: S.previa.blobName, locales: [S.cfg.locale],
+        diarize: Number(simpleDiarize()) || 0
+      })
+    });
+    const txt = await res.text();
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+    if (!d.text) throw new Error('Azure no devolvió texto. ¿El audio quedó en silencio?');
+
+    S.tr = { text: d.text, phrases: normalizePhrases(d), mock: !!d.mock,
+             locale: S.cfg.locale, blobName: S.previa.blobName };
+    renderSimple(S.tr);
+    avisarAlPadre(S.tr);
+    btn.classList.add('hidden');
+    simpleEstado('Ya existe una grabación para este caso: solo lectura', false);
+  } catch (e){
+    btn.disabled = false;
+    setMsg($('simpleErr'), 'Error al transcribir: ' + e.message, 'bad');
+    simpleEstado('Ya existe una grabación para este caso: solo lectura', false);
+  }
 }
 function download(){
   const a = document.createElement('a');
@@ -1844,7 +1927,9 @@ function init(){
   $('simpleStop').onclick   = simpleDetener;
   $('simpleCopiar').onclick = () => navigator.clipboard.writeText(S.tr.text)
     .then(() => { $('simpleCopiar').textContent = 'Copiado'; });
+  $('simpleTr').onclick     = simpleTranscribirPrevia;
   $('simpleOtra').onclick   = () => {
+    if (S.previa) return;                 // caso con grabacion: solo lectura
     resetTake();
     $('simpleOut').classList.add('hidden');
     setMsg($('simpleErr'), '');

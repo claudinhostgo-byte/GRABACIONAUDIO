@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-6" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.08-7" />
 </head>
 <body>
 <div class="shell">
@@ -237,6 +237,15 @@
 
     <div id="simpleErr" class="msg"></div>
 
+    <div id="simplePrevia" class="hidden">
+      <h3 class="trh">Grabación registrada</h3>
+      <audio id="simpleAudio" class="player" controls></audio>
+      <div id="simplePreviaMeta" class="meta"></div>
+      <div class="ctrls">
+        <button id="simpleTr" class="primary hidden" type="button">Transcribir</button>
+      </div>
+    </div>
+
     <div id="simpleOut" class="hidden">
       <h3 class="trh">Transcripción</h3>
       <div id="simpleAviso" class="banner mock hidden"></div>
@@ -328,6 +337,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.08-6"></script>
+<script src="assets/app.js?v=2026.10.08-7"></script>
 </body>
 </html>
