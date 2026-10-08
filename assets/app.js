@@ -3,6 +3,10 @@
 (() => {
 'use strict';
 
+/* Version visible en pantalla. Se sube en cada cambio de la pagina, para
+   poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
+const VERSION = '2026.10.08-1';
+
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
 const HIST_KEY = 'wit.audiorec.hist.v1';
@@ -1645,7 +1649,18 @@ function download(){
 }
 
 /* ---------- arranque ---------- */
+/** Marca de version, discreta, en todas las pantallas. */
+function pintarVersion(){
+  const b = document.createElement('div');
+  b.className = 'verbadge';
+  b.textContent = 'v' + VERSION;
+  b.title = 'Versión de la página. Si no coincide con la esperada, recargue con Ctrl+F5.';
+  document.body.appendChild(b);
+  console.log('Grabador W-IT: versión ' + VERSION);
+}
+
 function init(){
+  pintarVersion();
   // incrustada en un formulario: sin encabezado propio, sin marco y siempre
   // en claro, para no verse como una isla ajena dentro de Dynamics
   if (EN_IFRAME){

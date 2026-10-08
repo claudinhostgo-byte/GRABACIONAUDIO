@@ -21,6 +21,18 @@
   },
   "routes": [
     {
+      "route": "/",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+    {
+      "route": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+    {
       "route": "/api/*",
       "headers": {
         "Cache-Control": "no-store"

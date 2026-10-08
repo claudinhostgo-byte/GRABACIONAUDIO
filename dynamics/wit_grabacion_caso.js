@@ -42,6 +42,11 @@ var WIT = WIT || {};
 WIT.Grabacion = (function () {
 
     // ---- configuracion -----------------------------------------------------
+    // Version del recurso web. Se sube en cada cambio y viaja en la URL del
+    // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
+    // cacheada de la pagina.
+    var VERSION      = "2026.10.08-1";
+
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
     var IFRAME_NAME  = "IFRAME_grabador";
@@ -71,6 +76,8 @@ WIT.Grabacion = (function () {
     var _montados = {};         // para no repetir el log de montaje
     var _ciclos = 0;
     var _casoActual = null;     // numero de caso que el vigilante esta sirviendo
+    var _escrituras = {};       // cuantas veces se escribio el src de cada control
+    var MAX_ESCRITURAS = 4;     // tope duro: ningun ciclo puede pasar de aqui
 
     // ---- utilidades --------------------------------------------------------
 
@@ -85,7 +92,8 @@ WIT.Grabacion = (function () {
     function urlGrabador(numeroCaso, simple) {
         return BASE_URL + "/?id=" + encodeURIComponent(numeroCaso) +
                "&lock=1&parent=" + encodeURIComponent(window.location.origin) +
-               (simple ? "&modo=simple" : "");
+               (simple ? "&modo=simple" : "") +
+               "&v=" + encodeURIComponent(VERSION);
     }
 
     function obtenerTab(formContext, nombre) {
@@ -154,33 +162,47 @@ WIT.Grabacion = (function () {
      * eso no basta con reintentar unos segundos tras el OnLoad: hace falta un
      * vigilante que corrija el iframe cada vez que la UCI lo vuelva a armar.
      */
-    function asegurarIframe(destino, nombreControl) {
+    function asegurarIframe(destino, nombreControl, forzar) {
         var el = buscarIframe(destino, nombreControl);
         if (!el) { return false; }
 
+        var src = el.getAttribute("src") || "";
         var faltaAllow = el.getAttribute("allow") !== ALLOW;
-        var srcActual = el.getAttribute("src") || "";
-        var faltaSrc = srcActual !== destino;
+        var yaEsDelGrabador = src.indexOf(BASE_URL) === 0;
 
-        if (!faltaAllow && !faltaSrc) { return true; }   // ya estaba bien
+        // Regla que cierra el ciclo por construccion: el vigilante NUNCA pisa
+        // una URL que ya apunta al grabador, aunque muestre otro numero de
+        // caso. Si dos formularios comparten el DOM, pisarla hace que cada uno
+        // se la devuelva al otro indefinidamente. Solo el montaje explicito
+        // (onLoad, onSave, abrir la pestana) puede forzar el cambio.
+        if (!forzar && yaEsDelGrabador && !faltaAllow) { return true; }
+        if (!forzar && yaEsDelGrabador && faltaAllow) {
+            el.setAttribute("allow", ALLOW);   // sin recargar: evita el ciclo
+            return true;
+        }
+
+        if (src === destino && !faltaAllow) { return true; }   // ya estaba bien
+
+        // Tope duro por control: si algo externo sigue reescribiendo el src,
+        // el script se rinde en vez de pelear para siempre.
+        var n = _escrituras[nombreControl] || 0;
+        if (n >= MAX_ESCRITURAS) {
+            if (n === MAX_ESCRITURAS) {
+                _escrituras[nombreControl] = n + 1;
+                console.warn("WIT.Grabacion: " + nombreControl + " se reescribio " +
+                             MAX_ESCRITURAS + " veces; se deja de insistir. " +
+                             "src actual: " + src);
+            }
+            return true;
+        }
+        _escrituras[nombreControl] = n + 1;
 
         if (faltaAllow) { el.setAttribute("allow", ALLOW); }
+        el.setAttribute("src", destino);
 
-        if (faltaSrc) {
-            el.setAttribute("src", destino);
-        } else {
-            // el allow solo aplica en una navegacion nueva: hay que recargar
-            el.setAttribute("src", "about:blank");
-            setTimeout(function () {
-                try { el.setAttribute("src", destino); } catch (e) {}
-            }, 50);
-        }
-
-        if (!_montados[nombreControl]) {
-            _montados[nombreControl] = true;
-            console.log("WIT.Grabacion: " + nombreControl + " montado con allow=\"" +
-                        ALLOW + "\"");
-        }
+        console.log("WIT.Grabacion: " + nombreControl + " -> src asignado (" +
+                    (n + 1) + "/" + MAX_ESCRITURAS + ")" +
+                    (src ? " | anterior: " + src.slice(0, 80) : ""));
         return true;
     }
 
@@ -193,6 +215,7 @@ WIT.Grabacion = (function () {
         if (_vigilante) { clearInterval(_vigilante); _vigilante = null; }
         _objetivos = [];
         _montados = {};
+        _escrituras = {};
         _ciclos = 0;
     }
 
@@ -206,7 +229,7 @@ WIT.Grabacion = (function () {
             }
             var pendientes = 0;
             for (var i = 0; i < _objetivos.length; i++) {
-                if (!asegurarIframe(_objetivos[i].destino, _objetivos[i].control)) {
+                if (!asegurarIframe(_objetivos[i].destino, _objetivos[i].control, false)) {
                     pendientes++;
                 }
             }
@@ -245,7 +268,9 @@ WIT.Grabacion = (function () {
         }
         if (!ya) { _objetivos.push({ destino: destino, control: nombre }); }
 
-        asegurarIframe(destino, nombre);
+        // un montaje explicito reinicia el contador y si puede cambiar la URL
+        _escrituras[nombre] = 0;
+        asegurarIframe(destino, nombre, true);
         vigilar();
         return true;
     }
@@ -335,6 +360,7 @@ WIT.Grabacion = (function () {
     // ---- manejadores de eventos -------------------------------------------
 
     function onLoad(executionContext) {
+        console.log("WIT.Grabacion: recurso web version " + VERSION);
         // cada carga empieza de cero: si quedaron objetivos de otro registro, el
         // vigilante seguiria persiguiendo una URL que ya no corresponde
         detenerVigilante();
