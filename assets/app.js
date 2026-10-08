@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-1';
+const VERSION = '2026.10.08-2';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1649,13 +1649,21 @@ function download(){
 }
 
 /* ---------- arranque ---------- */
-/** Marca de version, discreta, en todas las pantallas. */
+/**
+ * Marca de version en el encabezado. Antes iba fija al pie de la ventana,
+ * pero dentro del iframe de Dynamics el pie queda fuera de lo visible sin
+ * hacer scroll dentro del propio iframe: nadie la veia.
+ */
 function pintarVersion(){
-  const b = document.createElement('div');
+  const b = document.createElement('span');
   b.className = 'verbadge';
   b.textContent = 'v' + VERSION;
   b.title = 'Versión de la página. Si no coincide con la esperada, recargue con Ctrl+F5.';
-  document.body.appendChild(b);
+
+  const destino = (MODO_SIMPLE && $('simpleCaso') && $('simpleCaso').parentNode)
+               || document.querySelector('.hdr')
+               || document.body;
+  destino.appendChild(b);
   console.log('Grabador W-IT: versión ' + VERSION);
 }
 
