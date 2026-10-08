@@ -81,7 +81,8 @@ def api_transcribe():
     body = request.get_json(silent=True) or {}
     try:
         result = core.transcribe_blob(
-            body.get("blobName"), body.get("locales"), body.get("diarize", 0)
+            body.get("blobName"), body.get("locales"), body.get("diarize", 0),
+            body.get("phrases")
         )
     except Exception as e:
         return _fail(e)

@@ -37,6 +37,7 @@ CONTENT_TYPES = {
 CONTENT_TYPES_VIDEO = {"webm": "video/webm", "mp4": "video/mp4"}
 PREFIJO_CLIP = "clip-"
 MAX_LOCALES = 4
+MAX_FRASES = 500            # tope defensivo de la lista de vocabulario
 _ID_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -267,7 +268,35 @@ def listar_grabaciones(record_id, con_texto=True):
     return {"recordId": rid, "count": len(items), "items": items}
 
 
-def transcribe_blob(blob_name, locales=None, diarize=0):
+def vocabulario(extra=None):
+    """Palabras y frases que sesgan el reconocimiento.
+
+    Sirve para nombres propios, terminos del negocio y modismos locales que el
+    modelo general no espera. Se arma con SPEECH_PHRASES (separadas por coma o
+    salto de linea) mas lo que mande el cliente en la peticion, de modo que se
+    pueda ajustar sin tocar codigo ni volver a desplegar.
+    """
+    crudo = os.environ.get("SPEECH_PHRASES", "")
+    frases = []
+    for parte in crudo.replace("\n", ",").split(","):
+        parte = parte.strip()
+        if parte:
+            frases.append(parte)
+    for parte in (extra or []):
+        parte = str(parte).strip()
+        if parte:
+            frases.append(parte)
+
+    vistas, unicas = set(), []
+    for f in frases:
+        clave = f.lower()
+        if clave not in vistas:
+            vistas.add(clave)
+            unicas.append(f)
+    return unicas[:MAX_FRASES]
+
+
+def transcribe_blob(blob_name, locales=None, diarize=0, phrases=None):
     """Descarga el blob y lo transcribe con Fast Transcription de Azure AI Speech."""
     key = os.environ.get("SPEECH_KEY")
     region = os.environ.get("SPEECH_REGION")
@@ -297,7 +326,13 @@ def transcribe_blob(blob_name, locales=None, diarize=0):
     if diarize > 1:
         definition["diarization"] = {"enabled": True, "maxSpeakers": diarize}
 
-    api_version = os.environ.get("SPEECH_API_VERSION", "2024-11-15")
+    # phraseList requiere api-version 2025-10-15 o posterior; si la version
+    # configurada es anterior se omite para no provocar un rechazo
+    frases = vocabulario(phrases)
+    api_version = os.environ.get("SPEECH_API_VERSION", "2025-10-15")
+    if frases and api_version >= "2025-10-15":
+        definition["phraseList"] = {"phrases": frases}
+
     url = ("https://{}.api.cognitive.microsoft.com"
            "/speechtotext/transcriptions:transcribe?api-version={}").format(region, api_version)
 
@@ -335,6 +370,8 @@ def transcribe_blob(blob_name, locales=None, diarize=0):
         "text": combined[0].get("text", "") if combined else "",
         "durationMilliseconds": data.get("durationMilliseconds"),
         "phrases": phrases,
+        "vocabulario": len(frases),
+        "apiVersion": api_version,
         "raw": data,
     }
 

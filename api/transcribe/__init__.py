@@ -30,7 +30,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         result = core.transcribe_blob(
-            body.get("blobName"), body.get("locales"), body.get("diarize", 0)
+            body.get("blobName"), body.get("locales"), body.get("diarize", 0),
+            body.get("phrases")
         )
     except Exception as e:
         status, payload = core.error_response(e)
