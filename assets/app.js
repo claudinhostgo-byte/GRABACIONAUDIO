@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-1';
+const VERSION = '2026.10.09-2';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1340,31 +1340,67 @@ function habilitarClip(){
 }
 
 /* ---------- Paso 2: micrófonos ---------- */
+/**
+ * Traduce el error de getUserMedia a algo accionable. Cada nombre tiene una
+ * causa distinta: confundir "sin permiso" con "Windows no entrega el
+ * dispositivo" manda al usuario a revisar lo que no es.
+ */
+function avisarErrorMic(e){
+  // dentro de un iframe, NotAllowedError casi siempre es el marco, no el usuario
+  const delMarco = EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+  let texto;
+  if (delMarco){
+    texto = AVISO_MARCO;
+  } else if (e.name === 'NotAllowedError'){
+    texto = 'El navegador tiene bloqueado el micrófono para este sitio. Haga clic en el ícono ' +
+      'del candado, junto a la dirección, cambie Micrófono a «Permitir» y recargue la página.';
+  } else if (e.name === 'NotReadableError' || e.name === 'AbortError'){
+    // hay permiso: es el sistema el que no entrega el dispositivo
+    texto = 'El permiso está concedido, pero Windows no le entrega el micrófono al navegador. ' +
+      'Revise que ninguna otra aplicación lo esté usando (Teams, Zoom, Webex) y que en ' +
+      'Configuración de Windows > Privacidad y seguridad > Micrófono esté activado el acceso ' +
+      'para las aplicaciones de escritorio. También puede elegir otro micrófono de la lista ' +
+      'y volver a intentar.';
+  } else if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError'){
+    texto = 'No se encontró el micrófono. Revise que esté conectado y encendido, o elija otro de la lista.';
+  } else {
+    texto = 'No se pudo acceder al micrófono: ' + e.name + '. ' +
+      'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.';
+  }
+  // la pantalla simple no muestra el banner: el error va bajo los botones
+  if (MODO_SIMPLE){
+    if (delMarco) msgConEscape($('simpleErr'), texto);
+    else setMsg($('simpleErr'), texto, 'bad');
+  } else {
+    banner(texto, delMarco);
+  }
+}
+
+/** Pide el permiso y prueba abrir el micrófono. Devuelve si quedó utilizable. */
 async function askPermission(){
+  // si ya hay uno elegido se prueba ese: el predeterminado puede ser justo el que falla
+  const devId = micSeleccionado();
   try {
-    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const tmp = await navigator.mediaDevices.getUserMedia(
+      { audio: devId ? { deviceId: { exact: devId } } : true });
     tmp.getTracks().forEach((t) => t.stop());
     await listMics();
+    S.micOk = true;
     $('btnPerm').classList.add('hidden');
     $('simplePermitir').classList.add('hidden');
     $('btnRec').disabled = false;
     $('vizmsg').textContent = 'Listo para grabar';
+    return true;
   } catch (e){
-    // dentro de un iframe, NotAllowedError casi siempre es el marco, no el usuario
-    const delMarco = EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
-    const texto = delMarco ? AVISO_MARCO :
-      e.name === 'NotAllowedError'
-        ? 'El navegador tiene bloqueado el micrófono para este sitio. Haga clic en el ícono ' +
-          'del candado, junto a la dirección, cambie Micrófono a «Permitir» y recargue la página.'
-        : 'No se pudo acceder al micrófono: ' + e.name + '. ' +
-          'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.';
-    // la pantalla simple no muestra el banner: el error va bajo los botones
-    if (MODO_SIMPLE){
-      if (delMarco) msgConEscape($('simpleErr'), texto);
-      else setMsg($('simpleErr'), texto, 'bad');
-    } else {
-      banner(texto, delMarco);
+    S.micOk = false;
+    avisarErrorMic(e);
+    // con permiso concedido la lista ya trae nombres: se ofrece elegir otro
+    if (e.name === 'NotReadableError' || e.name === 'AbortError' ||
+        e.name === 'NotFoundError' || e.name === 'OverconstrainedError'){
+      try { await listMics(); } catch (e2) {}
+      $('simplePermitir').textContent = 'Probar micrófono';
     }
+    return false;
   }
 }
 
@@ -1374,9 +1410,9 @@ async function simplePermitir(){
   btn.disabled = true;
   setMsg($('simpleErr'), '');
   simpleEstado('Solicitando acceso al micrófono…', true);
-  await askPermission();
+  const ok = await askPermission();
   btn.disabled = false;
-  simpleEstado(micSeleccionado() ? 'Listo para grabar' : 'Sin acceso al micrófono', false);
+  simpleEstado(ok ? 'Listo para grabar' : 'Sin acceso al micrófono', false);
 }
 async function listMics(){
   const devs = (await navigator.mediaDevices.enumerateDevices())
@@ -1529,11 +1565,9 @@ async function startRec(){
       }
     });
   } catch (e){
-    if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
-      banner(AVISO_MARCO, true);
-    } else {
-      banner('No se pudo abrir el micrófono seleccionado: ' + e.name);
-    }
+    S.rec = null;
+    S.micOk = false;
+    avisarErrorMic(e);
     return;
   }
 
@@ -2013,13 +2047,11 @@ async function simpleGrabar(){
   S.cfg.diarize = simpleDiarize();
 
   // el permiso se pide en el primer intento, no antes
-  if (!micSeleccionado()){
+  if (!S.micOk){
     simpleEstado('Solicitando acceso al micrófono…', true);
-    await askPermission();
-    if (!micSeleccionado()){
-      // askPermission ya dejo el motivo concreto (a veces con enlace): no se pisa
-      if ($('simpleErr').textContent) simpleEstado('Sin acceso al micrófono', false);
-      else simpleError('No se pudo acceder al micrófono. Revise el permiso del navegador.');
+    if (!(await askPermission())){
+      // askPermission ya dejo el motivo concreto (a veces con enlace)
+      simpleEstado('Sin acceso al micrófono', false);
       return;
     }
   }
@@ -2032,7 +2064,17 @@ async function simpleGrabar(){
   $('simplePers').disabled = true;
   $('simpleMic').disabled = true;
   await startRec();
-  if (MODO_VIVO && S.rec && S.rec.state === 'recording') vivoIniciar();
+  if (!S.rec || S.rec.state !== 'recording'){
+    // startRec ya explico el motivo; se deja la pantalla lista para reintentar
+    $('simpleDot').classList.add('hidden');
+    $('simpleRec').disabled = false;
+    $('simpleStop').disabled = true;
+    $('simplePers').disabled = false;
+    $('simpleMic').disabled = !micSeleccionado();
+    simpleEstado('Sin acceso al micrófono', false);
+    return;
+  }
+  if (MODO_VIVO) vivoIniciar();
 }
 
 function simpleDetener(){
@@ -2378,7 +2420,7 @@ function init(){
   };
 
   $('btnCam').onclick        = permitirCamara;
-  $('simpleMic').onchange   = () => { $('micSel').value = $('simpleMic').value; };
+  $('simpleMic').onchange   = () => { $('micSel').value = $('simpleMic').value; S.micOk = false; };
   $('simpleRec').onclick    = simpleGrabar;
   $('simplePermitir').onclick = simplePermitir;
   $('simpleStop').onclick   = simpleDetener;
