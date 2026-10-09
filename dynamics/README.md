@@ -95,6 +95,38 @@ simplificada (sube, transcribe por hablante y deja la revisión del guion dispon
 Azure AI Speech (`SPEECH_KEY`, `SPEECH_REGION`) y Azure OpenAI (`AOAI_*`), los mismos que ya
 usan la transcripción y la revisión del guion.
 
+#### Datos de la solicitud (pestaña en vivo)
+
+Bajo los temas, la pestaña en vivo muestra **Monto solicitado**, **Ingresos mensuales** y **RUT**.
+Se completan solos cuando el cliente los dice: el RUT al instante si se reconoce con su dígito
+verificador válido, y los tres mediante Azure OpenAI, siempre con la frase que los respalda.
+La persona revisa, corrige si hace falta y confirma con **OK**; solo entonces el dato pasa al
+caso. Un campo corregido a mano no se vuelve a sobrescribir.
+
+El traspaso usa el mismo canal que la transcripción: la página avisa por `postMessage` y este
+recurso web escribe el campo con la sesión del usuario, guarda y responde. Se rechaza el dato si
+el formulario ya no muestra el caso de la grabación.
+
+| Dato | Campo en Caso | Tipo |
+|---|---|---|
+| Monto solicitado | `wit_montosolicitado` | Moneda |
+| Ingresos mensuales | `wit_ingresosmensuales` | Moneda |
+| RUT | `wit_rut` | Texto (12), formato `12.345.678-5` |
+
+Para crearlos (requiere `az login` con un usuario personalizador del ambiente):
+
+```powershell
+.\infra\dynamics_campos.ps1
+```
+
+Es idempotente y los deja en la solución `DemoLandingsWIT`. Después hay que **agregarlos al
+formulario** principal del Caso (pueden ir en la pestaña Resumen o en una sección propia) y
+publicar: `getAttribute` no ve un campo que no esté en el formulario. Si el prefijo del
+publicador no es `wit`, ajuste `CAMPOS_DATOS` en `wit_grabacion_caso.js`.
+
+Son datos personales (RUT e ingresos): pasan por Azure OpenAI dentro de la transcripción, no se
+registran en el log de la API y solo se escriben en el caso tras la confirmación de la persona.
+
 Repetir los pasos de abajo para cada pestaña que se quiera, cambiando nombre de pestaña y de
 control según la tabla.
 

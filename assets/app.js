@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-5';
+const VERSION = '2026.10.09-6';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -28,6 +28,7 @@ const CFG_NUBE = {
   trMockUrl: '',
   recUrl: '/api/records',
   evalUrl: '/api/evaluar',
+  extraerUrl: '/api/extraer',
   speechTokenUrl: '/api/speechtoken',
   locale: 'es-CL',
   diarize: '0'
@@ -44,6 +45,7 @@ const CFG_LOCAL = {
   trMockUrl: 'http://localhost:5501/transcribe',
   recUrl: 'http://localhost:5501/records',
   evalUrl: 'http://localhost:5501/evaluar',
+  extraerUrl: 'http://localhost:5501/extraer',
   speechTokenUrl: 'http://localhost:5501/speechtoken',
   locale: 'es-CL',
   diarize: '0'
@@ -242,6 +244,8 @@ function saveCfg(){
     trMockUrl: $('cfgTrMockUrl').value.trim(),
     recUrl:    S.cfg.recUrl,
     evalUrl:   S.cfg.evalUrl,
+    extraerUrl:     S.cfg.extraerUrl,
+    speechTokenUrl: S.cfg.speechTokenUrl,
     locale:    $('cfgLocale').value,
     diarize:   $('cfgDiarize').value
   };
@@ -714,15 +718,18 @@ const V = {
   previo: null,           // {tk, t}: token pedido al abrir la pantalla
   frases: [], parcial: '', t0: 0,
   temas: [],              // [{cumple, evidencia}] por tema, solo sube de nivel
+  datos: {},              // por campo de DATOS_SOLICITUD, ver datoVacio()
   timer: 0, enCurso: false, pendiente: false, ultima: 0, revisadoHasta: 0
 };
 
 function vivoReiniciar(){
   V.gen++;
   V.frases = []; V.parcial = ''; V.ultima = 0; V.revisadoHasta = 0;
-  V.pendiente = false; V.enCurso = false; V.conectado = false;
+  V.pendiente = false; V.enCurso = false; V.conectado = false; V.simulado = false;
   clearTimeout(V.timer);
   V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
+  DATOS_SOLICITUD.forEach((c) => { V.datos[c.id] = datoVacio(); });
+  pintarDatos();
   $('vivoCol').classList.remove('hidden');
   $('vivoAviso').classList.add('hidden');
   setMsg($('vivoMsg'), '');
@@ -801,6 +808,7 @@ function vivoFrase(texto){
   V.parcial = '';
   pintarVivoTexto();
   marcarPorClave(texto, false);
+  rutPorPatron(texto);
   vivoProgramar();
 }
 
@@ -812,17 +820,34 @@ function vivoParcial(texto){
 
 /* Revisiones espaciadas: a lo mas una en curso y una cada VIVO_PAUSA_MS. Lo
    que llegue mientras tanto se junta en la siguiente. */
+function vivoHayPendientes(){
+  return V.temas.some((t) => t.cumple !== 'si') || datosPendientes().length > 0;
+}
+
 function vivoProgramar(){
-  if (V.temas.every((t) => t.cumple === 'si')) return;
+  if (!vivoHayPendientes()) return;
   if (V.enCurso){ V.pendiente = true; return; }
   clearTimeout(V.timer);
   V.timer = setTimeout(vivoRevisar, Math.max(0, V.ultima + VIVO_PAUSA_MS - Date.now()));
 }
 
+async function postJson(url, cuerpo){
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cuerpo)
+  });
+  const txt = await res.text();
+  let d;
+  try { d = JSON.parse(txt); }
+  catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
+  if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+  return d;
+}
+
+/** Una vuelta de revision: temas pendientes y datos sin confirmar, a la vez. */
 async function vivoRevisar(){
-  const url = S.cfg.evalUrl;
-  const pendientes = TEMAS_VIVO.map((t, i) => i).filter((i) => V.temas[i].cumple !== 'si');
-  if (!url || !pendientes.length || V.revisadoHasta >= V.frases.length) return;
+  if (!vivoHayPendientes() || V.revisadoHasta >= V.frases.length) return;
 
   // solo el tramo final: lo anterior ya se reviso, y asi el costo de cada
   // llamada no crece con el largo de la conversacion
@@ -831,43 +856,301 @@ async function vivoRevisar(){
   const hasta = V.frases.length;
   V.enCurso = true; V.ultima = Date.now();
 
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texto, vivo: true, recordId: S.id,
-                             criterios: pendientes.map((i) => TEMAS_VIVO[i].criterio) })
-    });
-    const txt = await res.text();
-    let d;
-    try { d = JSON.parse(txt); }
-    catch (e){ throw new Error('respuesta no es JSON: ' + txt.slice(0, 150)); }
-    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
-    if (gen !== V.gen) return;          // la sesion se reinicio mientras tanto
+  const [errTemas, errDatos] = await Promise.all([
+    revisarTemas(texto, gen).then(() => null, (e) => e),
+    revisarDatos(texto, gen).then(() => null, (e) => e)
+  ]);
+  if (gen !== V.gen) return;            // la sesion se reinicio mientras tanto
 
-    V.revisadoHasta = hasta;
-    let recien = -1;
-    (d.resultados || []).forEach((r, k) => {
-      const i = pendientes[k];
-      if (i == null) return;
-      // en vivo basta la mencion: "parcial" tambien es check. Un tema
-      // marcado no se desmarca: la frase ya se dijo
-      if ((r.cumple === 'si' || r.cumple === 'parcial') && V.temas[i].cumple !== 'si'){
-        V.temas[i] = { cumple: 'si', evidencia: r.evidencia };
-        recien = i;
-      }
-    });
-    pintarTemasVivo(recien);
-    if (d.mock) setMsg($('vivoMsg'), 'Revisión simulada por palabra clave.', 'bad');
-    else setMsg($('vivoMsg'), '');
-  } catch (e){
-    if (gen === V.gen) setMsg($('vivoMsg'), 'No se pudo revisar: ' + e.message, 'bad');
-  } finally {
-    if (gen === V.gen){
-      V.enCurso = false;
-      if (V.pendiente){ V.pendiente = false; vivoProgramar(); }
+  V.revisadoHasta = hasta;
+  const errores = [errTemas && 'temas: ' + errTemas.message,
+                   errDatos && 'datos: ' + errDatos.message].filter(Boolean);
+  if (errores.length) setMsg($('vivoMsg'), 'No se pudo revisar (' + errores.join('; ') + ').', 'bad');
+  else if (V.simulado) setMsg($('vivoMsg'), 'Revisión simulada, no proviene de un análisis real.', 'bad');
+  else setMsg($('vivoMsg'), '');
+
+  V.enCurso = false;
+  if (V.pendiente){ V.pendiente = false; vivoProgramar(); }
+}
+
+async function revisarTemas(texto, gen){
+  const pendientes = TEMAS_VIVO.map((t, i) => i).filter((i) => V.temas[i].cumple !== 'si');
+  if (!S.cfg.evalUrl || !pendientes.length) return;
+  const d = await postJson(S.cfg.evalUrl, {
+    texto, vivo: true, recordId: S.id,
+    criterios: pendientes.map((i) => TEMAS_VIVO[i].criterio)
+  });
+  if (gen !== V.gen) return;
+  V.simulado = !!d.mock;
+
+  let recien = -1;
+  (d.resultados || []).forEach((r, k) => {
+    const i = pendientes[k];
+    if (i == null) return;
+    // en vivo basta la mencion: "parcial" tambien es check. Un tema
+    // marcado no se desmarca: la frase ya se dijo
+    if ((r.cumple === 'si' || r.cumple === 'parcial') && V.temas[i].cumple !== 'si'){
+      V.temas[i] = { cumple: 'si', evidencia: r.evidencia };
+      recien = i;
     }
+  });
+  pintarTemasVivo(recien);
+}
+
+async function revisarDatos(texto, gen){
+  const pendientes = datosPendientes();
+  if (!S.cfg.extraerUrl || !pendientes.length) return;
+  const d = await postJson(S.cfg.extraerUrl, {
+    texto, recordId: S.id, campos: pendientes.map((c) => c.clave)
+  });
+  if (gen !== V.gen) return;
+  V.simulado = V.simulado || !!d.mock;
+  pendientes.forEach((c) => {
+    const r = (d.datos || {})[c.clave];
+    // si el modelo no lo encuentra en este tramo, se conserva lo anterior
+    if (r && r.valor != null && r.evidencia) proponerDato(c.id, r.valor, r.evidencia);
+  });
+}
+
+/* ---------- Datos de la solicitud (modo en vivo) ----------
+
+   El ejecutivo los pide en la conversacion; aqui se proponen solos y la
+   persona los confirma o corrige. Solo lo confirmado pasa al caso de
+   Dynamics. Un campo corregido a mano no se vuelve a sobrescribir. */
+const DATOS_SOLICITUD = [
+  { id: 'monto',    clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto' },
+  { id: 'ingresos', clave: 'ingresos_mensuales', titulo: 'Ingresos mensuales', tipo: 'monto' },
+  { id: 'rut',      clave: 'rut',                titulo: 'RUT',                tipo: 'rut' }
+];
+const DATO_TRASPASO_MS = 15000;     // espera maxima de la respuesta de Dynamics
+
+/* estado: vacio -> detectado -> (editado) -> confirmado
+   traspaso: null | enviando | ok | error | sin-dynamics */
+const datoVacio = () => ({ valor: null, evidencia: null, estado: 'vacio', traspaso: null,
+                          error: '', corregido: false });
+
+/** Los que la extraccion todavia puede completar o actualizar. */
+const datosPendientes = () => DATOS_SOLICITUD.filter((c) =>
+  V.datos[c.id] && (V.datos[c.id].estado === 'vacio' || V.datos[c.id].estado === 'detectado'));
+
+/** Cuerpo y digito verificador de un RUT, o null si no tiene forma de RUT. */
+function partesRut(texto){
+  const t = String(texto || '').replace(/[^0-9kK]/g, '').toUpperCase();
+  if (t.length < 2 || t.length > 9 || !/^\d+[\dK]$/.test(t)) return null;
+  return { cuerpo: t.slice(0, -1).replace(/^0+/, '') || '0', dv: t.slice(-1) };
+}
+
+function rutValido(texto){
+  const p = partesRut(texto);
+  if (!p) return false;
+  let suma = 0, factor = 2;
+  for (let i = p.cuerpo.length - 1; i >= 0; i--){
+    suma += Number(p.cuerpo[i]) * factor;
+    factor = factor === 7 ? 2 : factor + 1;
   }
+  const r = 11 - (suma % 11);
+  return p.dv === (r === 11 ? '0' : r === 10 ? 'K' : String(r));
+}
+
+function formatoDato(tipo, valor){
+  if (valor == null || valor === '') return '';
+  if (tipo === 'rut'){
+    const p = partesRut(valor);
+    return p ? Number(p.cuerpo).toLocaleString('es-CL') + '-' + p.dv : String(valor);
+  }
+  return '$' + Number(valor).toLocaleString('es-CL');
+}
+
+/** Valor del campo listo para guardar, o un texto de error. */
+function leerDato(c, texto){
+  if (c.tipo === 'rut'){
+    if (!partesRut(texto)) return { error: 'Escriba el RUT con su dígito verificador, por ejemplo 12.345.678-5.' };
+    if (!rutValido(texto)) return { error: 'El dígito verificador no corresponde a ese RUT.' };
+    return { valor: formatoDato('rut', texto) };
+  }
+  const n = Number(String(texto || '').replace(/[^0-9]/g, ''));
+  if (!n) return { error: 'Escriba un monto en pesos, mayor que cero.' };
+  return { valor: n };
+}
+
+/** Propuesta que llega de la conversacion. No pisa lo corregido ni lo confirmado. */
+function proponerDato(id, valor, evidencia){
+  const d = V.datos[id];
+  if (!d || (d.estado !== 'vacio' && d.estado !== 'detectado')) return;
+  const c = DATOS_SOLICITUD.find((x) => x.id === id);
+  const nuevo = c.tipo === 'rut' ? formatoDato('rut', valor) : Number(valor);
+  if (d.estado === 'detectado' && String(d.valor) === String(nuevo)) return;
+  V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado' });
+  pintarDato(c, true);
+}
+
+/* El RUT dicho con digitos se reconoce sin esperar al modelo; solo se acepta
+   si el digito verificador calza, para no confundirlo con otra cifra. */
+const RUT_EN_TEXTO = /\b\d{1,2}\.?\d{3}\.?\d{3}\s*-?\s*[\dkK]\b/g;
+function rutPorPatron(texto){
+  const m = String(texto).match(RUT_EN_TEXTO);
+  const valido = (m || []).reverse().find((x) => rutValido(x));
+  if (valido) proponerDato('rut', valido, texto);
+}
+
+/** Arma los campos una sola vez; despues se actualizan sin perder el foco. */
+function pintarDatos(){
+  const cont = $('datosSolicitud');
+  if (!cont) return;
+  cont.innerHTML = '';
+  DATOS_SOLICITUD.forEach((c) => {
+    const box = document.createElement('div');
+    box.className = 'dato';
+    box.id = 'dato_' + c.id;
+
+    const lab = document.createElement('label');
+    lab.htmlFor = 'datoIn_' + c.id;
+    lab.textContent = c.titulo;
+    box.appendChild(lab);
+
+    const fila = document.createElement('div');
+    fila.className = 'dato-fila';
+    const inp = document.createElement('input');
+    inp.id = 'datoIn_' + c.id;
+    inp.type = 'text';
+    inp.autocomplete = 'off';
+    inp.spellcheck = false;
+    inp.inputMode = c.tipo === 'rut' ? 'text' : 'numeric';
+    inp.placeholder = c.tipo === 'rut' ? '12.345.678-5' : '$0';
+    inp.addEventListener('input', () => {
+      const d = V.datos[c.id];
+      if (d.estado === 'confirmado') return;
+      d.estado = 'editado'; d.error = ''; d.corregido = true;
+      pintarDato(c, false, true);
+    });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmarDato(c); });
+    fila.appendChild(inp);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'primary small';
+    btn.id = 'datoBtn_' + c.id;
+    btn.onclick = () => confirmarDato(c);
+    fila.appendChild(btn);
+    box.appendChild(fila);
+
+    const est = document.createElement('div');
+    est.className = 'dato-estado';
+    est.id = 'datoEst_' + c.id;
+    box.appendChild(est);
+
+    const ev = document.createElement('div');
+    ev.className = 'crit-evidencia hidden';
+    ev.id = 'datoEv_' + c.id;
+    box.appendChild(ev);
+
+    cont.appendChild(box);
+    pintarDato(c);
+  });
+}
+
+/** `soloEstado` evita reescribir el campo mientras la persona escribe. */
+function pintarDato(c, recien, soloEstado){
+  const d = V.datos[c.id];
+  const box = $('dato_' + c.id);
+  if (!d || !box) return;
+  const inp = $('datoIn_' + c.id), btn = $('datoBtn_' + c.id);
+  const est = $('datoEst_' + c.id), ev = $('datoEv_' + c.id);
+
+  if (!soloEstado){
+    inp.value = c.tipo === 'rut' ? (d.valor || '') : formatoDato('monto', d.valor);
+  }
+  const confirmado = d.estado === 'confirmado';
+  inp.readOnly = confirmado;
+  btn.textContent = confirmado ? 'Editar' : 'OK';
+  btn.className = confirmado ? 'ghost small' : 'primary small';
+
+  box.className = 'dato' + (d.estado === 'detectado' ? ' detectado' : '') +
+                  (confirmado ? ' confirmado' : '') + (recien ? ' recien' : '');
+
+  let texto = '', clase = '';
+  // un error de traspaso se explica abajo, junto a como reintentar
+  if (d.error && !confirmado){ texto = d.error; clase = 'bad'; }
+  else if (d.estado === 'vacio') texto = 'Esperando que se mencione en la conversación…';
+  else if (d.estado === 'detectado'){
+    if (c.tipo === 'rut' && !rutValido(d.valor)){
+      texto = 'Detectado, pero el dígito verificador no corresponde: revíselo.'; clase = 'bad';
+    } else texto = 'Detectado en la conversación. Revise y confirme con OK.';
+  }
+  else if (d.estado === 'editado') texto = 'Corregido a mano. Confirme con OK.';
+  else if (confirmado){
+    texto = { enviando: 'Confirmado. Traspasando al caso…',
+              ok: 'Confirmado y traspasado al caso ✓',
+              error: 'Confirmado, pero no llegó al caso: ' + (d.error || 'sin respuesta') +
+                     '. Use Editar y OK para reintentar.',
+              'sin-dynamics': 'Confirmado. Para traspasarlo al caso, use esta pantalla desde Dynamics.'
+            }[d.traspaso] || 'Confirmado.';
+    clase = d.traspaso === 'ok' ? 'ok' : d.traspaso === 'error' ? 'bad' : '';
+  }
+  est.textContent = texto;
+  est.className = 'dato-estado' + (clase ? ' ' + clase : '');
+
+  // corregido a mano: la cita queda como respaldo de lo que se escuchó
+  ev.textContent = !d.evidencia ? '' :
+    (d.corregido ? 'Corregido a mano. En la conversación: ' : '') + '«' + d.evidencia + '»';
+  ev.classList.toggle('hidden', !d.evidencia);
+}
+
+function confirmarDato(c){
+  const d = V.datos[c.id];
+  if (d.estado === 'confirmado'){
+    // Editar: vuelve a abrir el campo; lo traspasado se reemplaza al confirmar
+    d.estado = 'editado'; d.traspaso = null; d.error = '';
+    pintarDato(c, false, true);
+    $('datoIn_' + c.id).focus();
+    return;
+  }
+  const r = leerDato(c, $('datoIn_' + c.id).value);
+  if (r.error){ d.error = r.error; pintarDato(c, false, true); return; }
+  d.valor = r.valor; d.estado = 'confirmado'; d.error = '';
+  traspasarDato(c);
+}
+
+/* Traspaso al caso: el formulario de Dynamics escribe el campo con la sesion
+   del usuario y responde. Mismo canal y misma validacion de origen que la
+   transcripcion. */
+function traspasarDato(c){
+  const d = V.datos[c.id];
+  if (!EN_IFRAME || !ORIGEN_PADRE){
+    d.traspaso = 'sin-dynamics';
+    pintarDato(c);
+    return;
+  }
+  d.traspaso = 'enviando';
+  pintarDato(c);
+  const valor = d.valor;
+  try {
+    window.parent.postMessage({ tipo: 'wit-dato', recordId: S.id, campo: c.id, valor }, ORIGEN_PADRE);
+  } catch (e){
+    d.traspaso = 'error'; d.error = e.message;
+    pintarDato(c);
+    return;
+  }
+  setTimeout(() => {
+    if (d.traspaso === 'enviando' && d.valor === valor){
+      d.traspaso = 'error'; d.error = 'Dynamics no respondió. ¿Está actualizado el recurso web?';
+      pintarDato(c);
+    }
+  }, DATO_TRASPASO_MS);
+}
+
+function escucharRespuestaDynamics(){
+  window.addEventListener('message', (ev) => {
+    if (!ORIGEN_PADRE || ev.origin !== ORIGEN_PADRE || ev.source !== window.parent) return;
+    const m = ev.data;
+    if (!m || m.tipo !== 'wit-dato-resultado') return;
+    const c = DATOS_SOLICITUD.find((x) => x.id === m.campo);
+    const d = c && V.datos[c.id];
+    if (!d || d.estado !== 'confirmado') return;
+    d.traspaso = m.ok ? 'ok' : 'error';
+    d.error = m.ok ? '' : (m.error || 'error desconocido');
+    pintarDato(c);
+  });
 }
 
 function cargarSdkVoz(){
@@ -988,6 +1271,12 @@ const GUION_SIMULADO = [
   'Claro, lo reviso. Por cierto, usted tiene un crédito preaprobado de consumo.',
   'No sabía, ¿y de cuánto sería?',
   'Se lo detallo enseguida. También tiene beneficios por ser socio en salud y educación.',
+  'Me interesa. ¿Me indica su RUT, por favor?',
+  'Sí, mi RUT es 12.345.678-5.',
+  '¿Cuánto necesita solicitar?',
+  'Necesito solicitar $2.000.000.',
+  '¿Y cuáles son sus ingresos mensuales?',
+  'Mi sueldo es de $850.000 al mes.',
   'Perfecto, muchas gracias.'
 ];
 
@@ -2445,6 +2734,7 @@ function init(){
     document.title = 'Grabación';
   }
   if (MODO_VIVO){
+    escucharRespuestaDynamics();
     document.body.classList.add('modo-vivo');
     document.title = 'Grabación en vivo';
     vivoReiniciar();

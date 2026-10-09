@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.09-5" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.09-6" />
 </head>
 <body>
 <div class="shell">
@@ -253,6 +253,11 @@
           <p class="hint">Se marcan solos cuando la conversación los toca, con la frase que lo respalda.</p>
           <ol id="vivoTemas" class="criterios"></ol>
           <div id="vivoMsg" class="msg"></div>
+
+          <h3 class="trh">Datos de la solicitud</h3>
+          <p class="hint">Se completan solos cuando el cliente los dice. Revise, corrija si hace
+            falta y confirme con OK: recién ahí pasan al caso.</p>
+          <div id="datosSolicitud" class="datos"></div>
           <p class="conv-nota">Indicio automático sobre el contenido de la conversación.
             No evalúa a la persona ni reemplaza una revisión humana.</p>
         </aside>
@@ -375,6 +380,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.09-5"></script>
+<script src="assets/app.js?v=2026.10.09-6"></script>
 </body>
 </html>

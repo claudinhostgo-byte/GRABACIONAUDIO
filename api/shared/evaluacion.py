@@ -5,6 +5,9 @@ Que hace: dado el texto de una conversacion y una lista de puntos a verificar
 ("se ofrecieron creditos?", "se explicaron los beneficios?"), responde por cada
 punto si se cubrio, con la CITA TEXTUAL que lo respalda.
 
+Tambien extrae los datos de la solicitud (monto, ingresos, RUT) dichos en la
+conversacion, con la misma regla: sin cita textual no hay dato.
+
 Que NO hace: calificar a la persona. Devuelve indicios sobre el contenido de la
 conversacion para que alguien los revise. Por eso toda respuesta afirmativa
 exige evidencia citada: sin cita, no hay afirmacion que sostener.
@@ -103,18 +106,11 @@ def disponible():
                 and os.environ.get("AOAI_DEPLOYMENT"))
 
 
-def evaluar(texto, criterios=None):
-    """Devuelve el resultado por criterio. No persiste nada."""
-    texto = (texto or "").strip()
-    if not texto:
-        raise ValueError("No hay transcripción que revisar.")
-    texto = texto[:MAX_TEXTO]
+def _chat(instrucciones, usuario):
+    """Una llamada a Azure OpenAI que debe responder JSON.
 
-    criterios = [str(c).strip() for c in (criterios or criterios_por_defecto()) if str(c).strip()]
-    criterios = criterios[:MAX_CRITERIOS]
-    if not criterios:
-        raise ValueError("No hay puntos que verificar.")
-
+    Devuelve (objeto JSON, uso de tokens, nombre del despliegue).
+    """
     endpoint = (os.environ.get("AOAI_ENDPOINT") or "").rstrip("/")
     key = os.environ.get("AOAI_KEY")
     deployment = os.environ.get("AOAI_DEPLOYMENT")
@@ -134,16 +130,13 @@ def evaluar(texto, criterios=None):
                 " El runtime no ve ninguna de las tres: revise que los cambios en "
                 "las variables de entorno se hayan aplicado."))
 
-    numerados = "\n".join("%d. %s" % (i + 1, c) for i, c in enumerate(criterios))
-    usuario = ("PUNTOS A VERIFICAR:\n%s\n\nTRANSCRIPCIÓN:\n%s" % (numerados, texto))
-
     url = "%s/openai/deployments/%s/chat/completions?api-version=%s" % (
         endpoint, deployment, api_version)
 
     cabeceras = {"api-key": key, "Content-Type": "application/json"}
     cuerpo = {
         "messages": [
-            {"role": "system", "content": INSTRUCCIONES},
+            {"role": "system", "content": instrucciones},
             {"role": "user", "content": usuario},
         ],
         "temperature": 0,
@@ -188,6 +181,25 @@ def evaluar(texto, criterios=None):
             "El modelo no devolvio JSON interpretable.",
             detail=(contenido or "")[:500])
 
+    return datos, (r.json().get("usage") or {}), deployment
+
+
+def evaluar(texto, criterios=None):
+    """Devuelve el resultado por criterio. No persiste nada."""
+    texto = (texto or "").strip()
+    if not texto:
+        raise ValueError("No hay transcripción que revisar.")
+    texto = texto[:MAX_TEXTO]
+
+    criterios = [str(c).strip() for c in (criterios or criterios_por_defecto()) if str(c).strip()]
+    criterios = criterios[:MAX_CRITERIOS]
+    if not criterios:
+        raise ValueError("No hay puntos que verificar.")
+
+    numerados = "\n".join("%d. %s" % (i + 1, c) for i, c in enumerate(criterios))
+    usuario = ("PUNTOS A VERIFICAR:\n%s\n\nTRANSCRIPCIÓN:\n%s" % (numerados, texto))
+    datos, uso, deployment = _chat(INSTRUCCIONES, usuario)
+
     crudos = datos.get("resultados") or []
     salida = []
     for i, criterio in enumerate(criterios):
@@ -214,7 +226,6 @@ def evaluar(texto, criterios=None):
             "justificacion": str((encontrado or {}).get("justificacion") or "").strip() or None,
         })
 
-    uso = r.json().get("usage") or {}
     return {
         "mock": False,
         "resultados": salida,
@@ -222,4 +233,114 @@ def evaluar(texto, criterios=None):
         "tokens": uso.get("total_tokens"),
         "aviso": ("Indicio automático sobre el contenido de la conversación. "
                   "No constituye una evaluación de la persona ni reemplaza una revisión humana."),
+    }
+
+
+# ---- datos de la solicitud -------------------------------------------------
+
+INSTRUCCIONES_EXTRAER = (
+    "Eres un asistente que toma nota durante una conversación de atención a un "
+    "cliente. Recibes la transcripción automática y debes extraer estos datos, "
+    "SOLO si el cliente los dijo de forma explícita:\n"
+    "  monto_solicitado    monto del crédito que el cliente pide, en pesos chilenos\n"
+    "  ingresos_mensuales  ingreso mensual del cliente, en pesos chilenos\n"
+    "  rut                 RUT chileno del cliente\n\n"
+    "Reglas estrictas:\n"
+    "1. Cada dato que entregues DEBE traer en \"evidencia\" la cita textual literal "
+    "de la transcripción de donde sale. Si no puedes citar, el valor es null.\n"
+    "2. Montos como número entero de pesos, sin puntos ni símbolos: \"un millón y "
+    "medio\" es 1500000, \"ochocientas cincuenta lucas\" es 850000.\n"
+    "3. RUT como cuerpo sin puntos, guion y dígito verificador: \"12345678-5\". "
+    "La letra K va en mayúscula. No completes ni inventes dígitos que no se dijeron.\n"
+    "4. Si un dato se dijo más de una vez, usa la última mención: suele ser una corrección.\n"
+    "5. No confundas el monto solicitado con los ingresos ni con otras cifras "
+    "(cuotas, plazos, tasas). Ante la duda, null.\n"
+    "6. La transcripción viene de reconocimiento de voz y puede tener errores.\n\n"
+    "Responde SOLO un objeto JSON con esta forma:\n"
+    '{"monto_solicitado":{"valor":1500000,"evidencia":"cita"},'
+    '"ingresos_mensuales":{"valor":null,"evidencia":null},'
+    '"rut":{"valor":"12345678-5","evidencia":"cita"}}'
+)
+
+CAMPOS_EXTRAER = ("monto_solicitado", "ingresos_mensuales", "rut")
+_RUT_RE = re.compile(r"^(\d{1,8})-([\dK])$")
+
+
+def rut_valido(rut):
+    """Comprueba el digito verificador (modulo 11) de un RUT "12345678-5"."""
+    m = _RUT_RE.match(rut or "")
+    if not m:
+        return False
+    cuerpo, dv = m.group(1), m.group(2)
+    suma, factor = 0, 2
+    for d in reversed(cuerpo):
+        suma += int(d) * factor
+        factor = 2 if factor == 7 else factor + 1
+    esperado = 11 - suma % 11
+    esperado = "0" if esperado == 11 else "K" if esperado == 10 else str(esperado)
+    return dv == esperado
+
+
+def _normalizar_rut(v):
+    t = re.sub(r"[^0-9kK]", "", str(v or "")).upper()
+    if len(t) < 2:
+        return None
+    return "%s-%s" % (t[:-1].lstrip("0") or "0", t[-1])
+
+
+def _normalizar_monto(v):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        n = int(round(v))
+    else:
+        digitos = re.sub(r"[^0-9]", "", str(v or ""))
+        n = int(digitos) if digitos else 0
+    return n if n > 0 else None
+
+
+def extraer(texto, campos=None):
+    """Datos de la solicitud dichos en la conversacion. No persiste nada.
+
+    Sin cita no hay dato: un valor sin evidencia se descarta. El RUT trae
+    ademas si su digito verificador es valido, para que la pagina lo advierta.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        raise ValueError("No hay transcripción de la que extraer datos.")
+    texto = texto[-MAX_TEXTO:]
+    pedidos = [c for c in (campos or CAMPOS_EXTRAER) if c in CAMPOS_EXTRAER]
+    if not pedidos:
+        raise ValueError("No hay campos que extraer.")
+
+    datos, uso, deployment = _chat(INSTRUCCIONES_EXTRAER,
+                                   "TRANSCRIPCIÓN:\n%s" % texto)
+
+    salida = {}
+    for campo in pedidos:
+        crudo = datos.get(campo) or {}
+        if not isinstance(crudo, dict):
+            crudo = {"valor": crudo}
+        evidencia = crudo.get("evidencia")
+        evidencia = str(evidencia).strip() if evidencia else None
+        if campo == "rut":
+            valor = _normalizar_rut(crudo.get("valor"))
+        else:
+            valor = _normalizar_monto(crudo.get("valor"))
+        if valor is None or not evidencia:
+            salida[campo] = None
+            continue
+        item = {"valor": valor, "evidencia": evidencia}
+        if campo == "rut":
+            item["dvValido"] = rut_valido(valor)
+        salida[campo] = item
+
+    # solo conteos: los valores son datos personales y no van al log
+    logging.info("Extraccion: %d de %d campos con dato",
+                 sum(1 for v in salida.values() if v), len(pedidos))
+    return {
+        "mock": False,
+        "datos": salida,
+        "modelo": deployment,
+        "tokens": uso.get("total_tokens"),
     }

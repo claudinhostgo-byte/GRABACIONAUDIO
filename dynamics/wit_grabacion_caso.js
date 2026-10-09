@@ -8,6 +8,9 @@
  *      - tab_grabacion_vivo   -> simplificada con transcripcion y temas en
  *                                vivo (?modo=vivo), opcional
  * 2. Recibe la transcripcion de vuelta y la agrega a la Descripcion del caso.
+ * 3. Recibe los datos de la solicitud que la persona confirmo en la pestana en
+ *    vivo (monto solicitado, ingresos mensuales, RUT) y los escribe en sus
+ *    campos del caso.
  *
  * Reglas de negocio:
  *   - La pestana permanece oculta mientras el caso no exista (formulario de
@@ -47,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.09-5";
+    var VERSION      = "2026.10.09-6";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -75,6 +78,17 @@ WIT.Grabacion = (function () {
     var FORM_TYPE_CREATE = 1;
     var MAX_TEXTO = 30000;          // recorte defensivo del texto a escribir
     var TIPO_MENSAJE = "wit-transcripcion";
+    var TIPO_DATO = "wit-dato";
+    var TIPO_DATO_RESULTADO = "wit-dato-resultado";
+
+    // Datos de la solicitud: campo de la pagina -> nombre logico en el caso.
+    // El prefijo (wit_) es el del publicador de la solucion: si el suyo es
+    // otro, cambielo aqui. Los campos deben estar agregados al formulario.
+    var CAMPOS_DATOS = {
+        monto:    "wit_montosolicitado",
+        ingresos: "wit_ingresosmensuales",
+        rut:      "wit_rut"
+    };
 
     var _formContext = null;
     var _escuchando = false;
@@ -84,6 +98,7 @@ WIT.Grabacion = (function () {
     var _ciclos = 0;
     var _casoActual = null;     // numero de caso que el vigilante esta sirviendo
     var _escrituras = {};       // cuantas veces se escribio el src de cada control
+    var _guardado = null;       // cola de guardados: uno a la vez
     var MAX_ESCRITURAS = 4;     // tope duro: ningun ciclo puede pasar de aqui
 
     // ---- utilidades --------------------------------------------------------
@@ -304,8 +319,13 @@ WIT.Grabacion = (function () {
         // el remitente tiene que ser exactamente el grabador
         if (ev.origin !== BASE_URL) { return; }
         var d = ev.data;
-        if (!d || d.tipo !== TIPO_MENSAJE) { return; }
-        if (!_formContext) { return; }
+        if (!d || !_formContext) { return; }
+
+        if (d.tipo === TIPO_DATO) {
+            escribirDato(d, ev.source);
+            return;
+        }
+        if (d.tipo !== TIPO_MENSAJE) { return; }
 
         try {
             escribirTranscripcion(d);
@@ -313,6 +333,80 @@ WIT.Grabacion = (function () {
             console.error("WIT.Grabacion: fallo al escribir la transcripcion", e);
             aviso("No se pudo escribir la transcripcion en el caso: " + e.message, "ERROR");
         }
+    }
+
+    // ---- datos de la solicitud --------------------------------------------
+
+    /** Misma normalizacion que usa el grabador para el ID del caso. */
+    function idSeguro(v) {
+        return String(v || "").trim().replace(/[{}]/g, "")
+            .replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
+    }
+
+    /** Guarda de a uno: tres OK seguidos no deben pisarse entre si. */
+    function guardarEnCola() {
+        var anterior = _guardado || Promise.resolve();
+        _guardado = anterior.then(function () {}, function () {}).then(function () {
+            return _formContext.data.save();
+        });
+        return _guardado;
+    }
+
+    function escribirDato(d, fuente) {
+        function responder(ok, error) {
+            try {
+                fuente.postMessage({ tipo: TIPO_DATO_RESULTADO, campo: d.campo,
+                                     ok: ok, error: error || null }, BASE_URL);
+            } catch (e) {
+                console.warn("WIT.Grabacion: no se pudo responder al grabador", e);
+            }
+        }
+
+        // el dato tiene que ser de ESTE caso: si el formulario cambio de
+        // registro mientras tanto, se rechaza en vez de escribirlo en otro
+        if (!_casoActual || idSeguro(d.recordId) !== idSeguro(_casoActual)) {
+            responder(false, "El formulario ya no muestra el caso de esta grabacion.");
+            return;
+        }
+
+        var nombre = CAMPOS_DATOS[d.campo];
+        if (!nombre) { responder(false, "Campo desconocido: " + d.campo); return; }
+
+        var attr = _formContext.getAttribute(nombre);
+        if (!attr) {
+            responder(false, "El campo " + nombre + " no esta en el formulario del caso.");
+            return;
+        }
+
+        var tipo = attr.getAttributeType();
+        var valor;
+        if (tipo === "money" || tipo === "decimal" || tipo === "double" || tipo === "integer") {
+            valor = Number(d.valor);
+            if (!isFinite(valor)) { responder(false, "El valor no es un numero."); return; }
+            if (tipo === "integer") { valor = Math.round(valor); }
+        } else {
+            valor = String(d.valor == null ? "" : d.valor).trim();
+        }
+
+        try {
+            attr.setValue(valor);
+            attr.setSubmitMode("always");
+        } catch (e) {
+            responder(false, "No se pudo escribir el campo: " + e.message);
+            return;
+        }
+
+        // si el guardado falla, el valor igual queda en el formulario y el
+        // usuario puede guardar a mano
+        guardarEnCola().then(
+            function () { responder(true); },
+            function (err) {
+                var msg = err && err.message ? err.message : "error desconocido";
+                aviso("El dato quedo en el formulario pero no se pudo guardar: " + msg +
+                      ". Guarde el caso manualmente.", "WARNING");
+                responder(false, "quedo en el formulario pero no se pudo guardar (" + msg + ")");
+            }
+        );
     }
 
     function escribirTranscripcion(datos) {
@@ -358,7 +452,7 @@ WIT.Grabacion = (function () {
 
         // el guardado deja el dato en Dataverse; si falla, el texto sigue en el
         // formulario y el usuario puede guardar a mano
-        _formContext.data.save().then(
+        guardarEnCola().then(
             function () { aviso("Transcripcion agregada a la descripcion del caso.", "INFO"); },
             function (err) {
                 aviso("La transcripcion quedo en el formulario pero no se pudo guardar: " +

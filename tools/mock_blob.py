@@ -79,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._evaluar()
         if ruta == "/records":
             return self._records()
+        if ruta == "/extraer":
+            return self._extraer()
         if ruta == "/speechtoken":
             # sin token: la pagina entiende que debe simular el reconocimiento
             return self._responder({"mock": True})
@@ -146,6 +148,39 @@ class Handler(BaseHTTPRequestHandler):
         print("  POST /evaluar  vivo, %d puntos simulados" % len(resultados), flush=True)
         return self._responder({"mock": True, "resultados": resultados, "modelo": "simulador",
                                 "aviso": "Resultado SIMULADO: no proviene de ningun analisis real."})
+
+    def _extraer(self):
+        """Simulador de extraccion: expresiones regulares, no entiende nada."""
+        import re
+        size = int(self.headers.get("Content-Length") or 0)
+        try:
+            req = json.loads(self.rfile.read(size) or b"{}")
+        except ValueError:
+            return self._fail(400, "InvalidInput", "JSON invalido.")
+        frases = [f.strip() for f in re.split(r"(?<=[.?!])\s+", req.get("texto") or "") if f.strip()]
+
+        def ultimo(claves, patron):
+            for f in reversed(frases):
+                if any(k in f.lower() for k in claves):
+                    m = re.search(patron, f)
+                    if m:
+                        return m.group(0), f
+            return None, None
+
+        datos = {}
+        for campo, claves in (("monto_solicitado", ("solicit", "necesit", "pedir")),
+                              ("ingresos_mensuales", ("gano", "ingreso", "sueldo"))):
+            v, cita = ultimo(claves, r"\$?\s?\d[\d.]{3,}")
+            n = int(re.sub(r"\D", "", v)) if v else 0
+            datos[campo] = {"valor": n, "evidencia": cita} if n else None
+        v, cita = ultimo(("rut",), r"\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]")
+        if v:
+            t = re.sub(r"[^\dkK]", "", v).upper()
+            datos["rut"] = {"valor": t[:-1] + "-" + t[-1], "evidencia": cita, "dvValido": True}
+        else:
+            datos["rut"] = None
+        print("  POST /extraer  %d campos simulados" % sum(1 for x in datos.values() if x), flush=True)
+        return self._responder({"mock": True, "datos": datos, "modelo": "simulador"})
 
     def _responder(self, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()

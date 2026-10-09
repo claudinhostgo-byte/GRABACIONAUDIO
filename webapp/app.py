@@ -10,6 +10,7 @@ Rutas:
   POST /api/sas          URL de subida con SAS acotado a un blob
   POST /api/transcribe   transcripcion con Azure AI Speech
   POST /api/speechtoken  token de Speech para la transcripcion en vivo
+  POST /api/extraer      monto, ingresos y RUT dichos en la conversacion
   GET  /api/health       diagnostico de configuracion (sin exponer secretos)
 
 Permite probar /api/sas y /api/transcribe contra Azure de verdad sin instalar
@@ -126,6 +127,19 @@ def api_evaluar():
             app.logger.warning("No se pudo recuperar la transcripcion: %s", e)
     try:
         return jsonify(evaluacion.evaluar(texto, body.get("criterios")))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except evaluacion.EvalConfigError as e:
+        return jsonify({"error": str(e)}), 500
+    except evaluacion.EvalUpstreamError as e:
+        return jsonify({"error": str(e), "detail": getattr(e, "detail", None)}), 502
+
+
+@app.post("/api/extraer")
+def api_extraer():
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(evaluacion.extraer(body.get("texto"), body.get("campos")))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except evaluacion.EvalConfigError as e:
