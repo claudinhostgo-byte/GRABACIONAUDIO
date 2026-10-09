@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-6';
+const VERSION = '2026.10.09-7';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -795,6 +795,7 @@ function pintarTemasVivo(recien){
       const ev = document.createElement('div');
       ev.className = 'crit-evidencia';
       ev.textContent = '«' + r.evidencia + '»';
+      ev.title = r.evidencia;
       li.appendChild(ev);
     }
     ol.appendChild(li);
@@ -1071,16 +1072,16 @@ function pintarDato(c, recien, soloEstado){
   let texto = '', clase = '';
   // un error de traspaso se explica abajo, junto a como reintentar
   if (d.error && !confirmado){ texto = d.error; clase = 'bad'; }
-  else if (d.estado === 'vacio') texto = 'Esperando que se mencione en la conversación…';
+  else if (d.estado === 'vacio') texto = 'Esperando que se mencione…';
   else if (d.estado === 'detectado'){
     if (c.tipo === 'rut' && !rutValido(d.valor)){
-      texto = 'Detectado, pero el dígito verificador no corresponde: revíselo.'; clase = 'bad';
-    } else texto = 'Detectado en la conversación. Revise y confirme con OK.';
+      texto = 'Detectado: el dígito verificador no corresponde.'; clase = 'bad';
+    } else texto = 'Detectado: revise y confirme con OK.';
   }
-  else if (d.estado === 'editado') texto = 'Corregido a mano. Confirme con OK.';
+  else if (d.estado === 'editado') texto = 'Corregido: confirme con OK.';
   else if (confirmado){
-    texto = { enviando: 'Confirmado. Traspasando al caso…',
-              ok: 'Confirmado y traspasado al caso ✓',
+    texto = { enviando: 'Traspasando al caso…',
+              ok: 'Traspasado al caso ✓',
               error: 'Confirmado, pero no llegó al caso: ' + (d.error || 'sin respuesta') +
                      '. Use Editar y OK para reintentar.',
               'sin-dynamics': 'Confirmado. Para traspasarlo al caso, use esta pantalla desde Dynamics.'
@@ -1093,6 +1094,7 @@ function pintarDato(c, recien, soloEstado){
   // corregido a mano: la cita queda como respaldo de lo que se escuchó
   ev.textContent = !d.evidencia ? '' :
     (d.corregido ? 'Corregido a mano. En la conversación: ' : '') + '«' + d.evidencia + '»';
+  ev.title = d.evidencia || '';
   ev.classList.toggle('hidden', !d.evidencia);
 }
 
@@ -1852,7 +1854,11 @@ function vizGeom(){
   const w = cv.clientWidth || 900, h = cv.clientHeight || VIZ_H;
   cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { ctx, w, h, bw: (w - GAP * (BARS - 1)) / BARS };
+  // en un medidor angosto caben menos barras: se ajustan para no quedar
+  // de ancho negativo, con un minimo de 3 px por barra
+  const gap = w < 300 ? 2 : GAP;
+  const n = Math.max(6, Math.min(BARS, Math.floor((w + gap) / (3 + gap))));
+  return { ctx, w, h, n, gap, bw: (w - gap * (n - 1)) / n };
 }
 
 /** colores del visualizador tomados del CSS, para que siga el tema activo */
@@ -1881,16 +1887,17 @@ function bar(ctx, x, mid, bw, bh, live, p){
 
 /** barras planas en reposo, para que el recuadro no se vea vacío */
 function drawIdle(){
-  const { ctx, w, h, bw } = vizGeom();
+  const { ctx, w, h, n, gap, bw } = vizGeom();
   const p = paleta();
   ctx.clearRect(0, 0, w, h);
-  for (let i = 0; i < BARS; i++) bar(ctx, i * (bw + GAP), h / 2, bw, 2, false, p);
+  for (let i = 0; i < n; i++) bar(ctx, i * (bw + gap), h / 2, bw, 2, false, p);
 }
 
 function startViz(){
-  const { ctx, w, h, bw } = vizGeom();
+  const { ctx, w, h, n, gap, bw } = vizGeom();
   const p = paleta();
   const bins = new Uint8Array(S.analyser.frequencyBinCount);
+  const margen = h > 60 ? 18 : 4;
 
   const draw = () => {
     S.raf = requestAnimationFrame(draw);
@@ -1898,12 +1905,12 @@ function startViz(){
     const live = S.rec && S.rec.state === 'recording';
     if (live) S.analyser.getByteFrequencyData(bins); else bins.fill(0);
 
-    const mid = h / 2, step = Math.max(1, Math.floor(bins.length * 0.65 / BARS));
-    for (let i = 0; i < BARS; i++){
+    const mid = h / 2, step = Math.max(1, Math.floor(bins.length * 0.65 / n));
+    for (let i = 0; i < n; i++){
       let sum = 0;
       for (let j = 0; j < step; j++) sum += bins[i * step + j] || 0;
       const v = (sum / step) / 255;
-      bar(ctx, i * (bw + GAP), mid, bw, Math.max(2, v * (h - 18)), live, p);
+      bar(ctx, i * (bw + gap), mid, bw, Math.max(2, v * (h - margen)), live, p);
     }
   };
   cancelAnimationFrame(S.raf); draw();

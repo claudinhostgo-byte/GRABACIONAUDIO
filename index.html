@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.09-6" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.09-7" />
 </head>
 <body>
 <div class="shell">
@@ -203,7 +203,7 @@
       <span id="simpleCaso" class="pill"></span>
     </div>
 
-    <div class="simple-pers">
+    <div class="simple-pers pers-mic">
       <label for="simpleMic">Micrófono</label>
       <select id="simpleMic" disabled>
         <option value="">— sin permiso de micrófono —</option>
@@ -211,7 +211,7 @@
       <button id="simplePermitir" class="primary" type="button">Permitir micrófono</button>
     </div>
 
-    <div class="simple-pers">
+    <div class="simple-pers pers-num">
       <label for="simplePers">¿Cuántas personas hablan?</label>
       <select id="simplePers">
         <option value="1">1 persona</option>
@@ -380,6 +380,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.09-6"></script>
+<script src="assets/app.js?v=2026.10.09-7"></script>
 </body>
 </html>

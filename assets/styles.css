@@ -424,7 +424,6 @@ body.modo-simple .card{margin-bottom:0}
 #vivo{display:none}
 body.modo-vivo #vivo{display:block;margin-top:14px}
 body.modo-vivo #vivo.hidden{display:none}
-body.modo-vivo .shell{max-width:1040px}
 .vivo-texto{margin-top:8px;padding:12px 14px;min-height:140px;max-height:360px;overflow-y:auto;
   background:var(--viz-bg);border:1px solid var(--line);border-radius:var(--r-lg);
   font-size:13px;line-height:1.55}
@@ -456,3 +455,98 @@ body.modo-vivo .shell{max-width:1040px}
 .dato .crit-evidencia{margin-top:6px}
 .dato.recien{animation:recien 1.6s ease-out}
 @media (prefers-reduced-motion: reduce){.dato.recien{animation:none}}
+
+/* ---------- modo en vivo: diseno compacto ----------
+   Una barra con todos los controles y el resto de la altura para la
+   conversacion, los temas y los datos. Pensado para el iframe de Dynamics,
+   donde cada pixel vertical cuenta. */
+body.modo-vivo .shell{max-width:1400px;padding:8px}
+body.embed.modo-vivo .shell{max-width:none;padding:2px 6px 6px}
+body.modo-vivo #simple{display:grid;column-gap:10px;row-gap:0;align-items:center;padding:10px 12px;
+  grid-template-columns:auto minmax(250px,auto) minmax(160px,1fr) auto auto;
+  grid-template-rows:auto auto 1fr auto auto;
+  grid-template-areas:"ctrls rec mic num hd" "err err err err err" "vivo vivo vivo vivo vivo"
+                      "previa previa previa previa previa" "out out out out out";
+  min-height:calc(100vh - 16px)}
+body.embed.modo-vivo #simple{min-height:calc(100vh - 8px)}
+body.modo-vivo .simple-hd{grid-area:hd;margin:0;padding:0;border:0;gap:6px}
+body.modo-vivo .simple-hd h2{display:none}
+
+body.modo-vivo .simple-ctrls{grid-area:ctrls;margin:0;justify-content:flex-start;flex-wrap:nowrap}
+body.modo-vivo .simple-ctrls .rec,
+body.modo-vivo .simple-ctrls .ghost{height:34px;min-width:0;font-size:13px;padding:0 14px}
+
+/* medidor mini: punto, barras, cronometro y estado en una linea */
+body.modo-vivo .simple-rec{grid-area:rec;display:flex;align-items:center;gap:10px;height:40px;
+  padding:0 10px;margin:0;text-align:left;overflow:hidden}
+body.modo-vivo .vizsimple{position:static;flex:0 0 96px;width:96px;height:24px;opacity:1}
+body.modo-vivo .simple-rec .dot{position:static;flex:0 0 8px}
+body.modo-vivo .simple-rec .dot.hidden{display:block;visibility:hidden}
+body.modo-vivo .simple-timer{font-size:18px;letter-spacing:0}
+body.modo-vivo .simple-estado{margin:0;font-size:12px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;min-width:0}
+body.modo-vivo .simple-prog{margin:0}
+
+body.modo-vivo .pers-mic{grid-area:mic;margin:0;min-width:0;gap:6px}
+body.modo-vivo .pers-num{grid-area:num;margin:0}
+body.modo-vivo #simpleMic{min-width:0}
+body.modo-vivo .pers-num select{width:auto}
+body.modo-vivo #simplePermitir{height:32px;padding:0 12px}
+/* las etiquetas se ocultan a la vista pero no a los lectores de pantalla */
+body.modo-vivo .simple-pers label{position:absolute;width:1px;height:1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;min-width:0}
+
+body.modo-vivo #simpleErr{grid-area:err;margin-top:6px}
+body.modo-vivo #simpleErr:empty{display:none}
+body.modo-vivo #vivo{grid-area:vivo;margin-top:10px;align-self:stretch;display:flex;min-height:0}
+body.modo-vivo #vivo.hidden{display:none}
+body.modo-vivo #simplePrevia{grid-area:previa}
+body.modo-vivo #simpleOut{grid-area:out}
+
+/* conversacion: toda la altura que queda */
+body.modo-vivo #vivo .columnas{gap:10px;align-items:stretch;flex:1;min-height:0}
+body.modo-vivo #vivoCol{display:flex;flex-direction:column;min-height:0}
+body.modo-vivo #vivo .trh{margin:0 0 6px;font-size:12.5px}
+body.modo-vivo .vivo-texto{margin-top:0;flex:1 1 0;min-height:200px;max-height:none}
+body.modo-vivo #vivo .col-panel{flex:0 0 380px;padding:10px 12px;display:flex;flex-direction:column}
+body.modo-vivo #vivo .col-panel .hint{display:none}
+body.modo-vivo #vivo .conv-nota{margin-top:auto;padding-top:8px;font-size:10.5px}
+
+/* temas lado a lado, cita en dos lineas como maximo */
+body.modo-vivo #vivoTemas{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
+body.modo-vivo #vivoTemas li{padding:7px 9px}
+body.modo-vivo #vivoTemas .crit-texto{font-size:13px}
+body.modo-vivo #vivoTemas .crit-evidencia,
+body.modo-vivo .dato .crit-evidencia{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;margin-top:4px;font-size:11px}
+body.modo-vivo #vivoMsg:empty{display:none}
+
+/* datos: etiqueta, campo y OK en una fila */
+body.modo-vivo #datosSolicitud + .conv-nota,
+body.modo-vivo #vivo .col-panel .trh + .hint + .datos{margin-top:0}
+body.modo-vivo #vivo .col-panel #vivoMsg + .trh{margin-top:12px}
+body.modo-vivo .datos{gap:6px;margin-top:0}
+body.modo-vivo .dato{display:grid;grid-template-columns:122px 1fr;column-gap:8px;align-items:center;
+  padding:6px 8px}
+body.modo-vivo .dato label{margin:0;font-size:12px}
+body.modo-vivo .dato-fila input{height:28px;padding:3px 7px}
+body.modo-vivo .dato-fila button{height:28px;min-width:56px}
+body.modo-vivo .dato-estado,
+body.modo-vivo .dato .crit-evidencia{grid-column:2;margin-top:3px}
+body.modo-vivo .dato-estado{font-size:11px}
+body.modo-vivo .dato .crit-evidencia{-webkit-line-clamp:1}
+
+/* pantallas angostas: la barra se reparte en dos filas */
+@media (max-width: 900px){
+  body.modo-vivo #simple{grid-template-columns:auto 1fr;
+    grid-template-rows:none;min-height:0;
+    grid-template-areas:"hd hd" "ctrls rec" "mic num" "err err" "vivo vivo" "previa previa" "out out"}
+  body.modo-vivo .simple-hd{margin-bottom:8px}
+  body.modo-vivo .vivo-texto{flex:none}
+  body.modo-vivo .pers-mic,
+  body.modo-vivo .pers-num{margin-top:8px}
+  body.modo-vivo #vivo .col-panel{flex:1 1 auto}
+  body.modo-vivo .vivo-texto{height:auto;max-height:50vh}
+}
+/* caso ya grabado (solo lectura): sin panel en vivo no hay alto que repartir */
+body.modo-vivo #simple:has(#vivo.hidden){min-height:0;grid-template-rows:none}
