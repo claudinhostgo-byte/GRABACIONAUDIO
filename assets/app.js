@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-2';
+const VERSION = '2026.10.09-3';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -864,10 +864,13 @@ async function vivoIniciar(){
 
     const cfg = sdk.SpeechConfig.fromAuthorizationToken(tk.token, tk.region);
     cfg.speechRecognitionLanguage = S.cfg.locale || 'es-CL';
-    // mismo microfono que la grabacion
-    const mic = micSeleccionado();
-    const audio = mic ? sdk.AudioConfig.fromMicrophoneInput(mic)
-                      : sdk.AudioConfig.fromDefaultMicrophoneInput();
+    // el mismo audio que ya se esta grabando, no una segunda apertura del
+    // microfono: hay dispositivos (las webcams, tipicamente) que Windows no
+    // entrega dos veces y fallan con NotReadableError. Se pasa un clon para
+    // que el SDK pueda cerrar sus pistas sin cortar la grabacion.
+    const audio = (S.stream && S.stream.active)
+      ? sdk.AudioConfig.fromStreamInput(S.stream.clone())
+      : sdk.AudioConfig.fromDefaultMicrophoneInput();
     const rec = new sdk.SpeechRecognizer(cfg, audio);
 
     if (tk.phrases && tk.phrases.length){
