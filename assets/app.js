@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.08-12';
+const VERSION = '2026.10.09-1';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1346,17 +1346,37 @@ async function askPermission(){
     tmp.getTracks().forEach((t) => t.stop());
     await listMics();
     $('btnPerm').classList.add('hidden');
+    $('simplePermitir').classList.add('hidden');
     $('btnRec').disabled = false;
     $('vizmsg').textContent = 'Listo para grabar';
   } catch (e){
     // dentro de un iframe, NotAllowedError casi siempre es el marco, no el usuario
-    if (EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError')){
-      banner(AVISO_MARCO, true);
+    const delMarco = EN_IFRAME && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    const texto = delMarco ? AVISO_MARCO :
+      e.name === 'NotAllowedError'
+        ? 'El navegador tiene bloqueado el micrófono para este sitio. Haga clic en el ícono ' +
+          'del candado, junto a la dirección, cambie Micrófono a «Permitir» y recargue la página.'
+        : 'No se pudo acceder al micrófono: ' + e.name + '. ' +
+          'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.';
+    // la pantalla simple no muestra el banner: el error va bajo los botones
+    if (MODO_SIMPLE){
+      if (delMarco) msgConEscape($('simpleErr'), texto);
+      else setMsg($('simpleErr'), texto, 'bad');
     } else {
-      banner('No se pudo acceder al micrófono: ' + e.name + '. ' +
-        'Revise el permiso del sitio en el navegador y que la página se sirva por HTTPS o localhost.');
+      banner(texto, delMarco);
     }
   }
+}
+
+/** Boton de la pantalla simple: abre el dialogo de permiso del navegador. */
+async function simplePermitir(){
+  const btn = $('simplePermitir');
+  btn.disabled = true;
+  setMsg($('simpleErr'), '');
+  simpleEstado('Solicitando acceso al micrófono…', true);
+  await askPermission();
+  btn.disabled = false;
+  simpleEstado(micSeleccionado() ? 'Listo para grabar' : 'Sin acceso al micrófono', false);
 }
 async function listMics(){
   const devs = (await navigator.mediaDevices.enumerateDevices())
@@ -1997,7 +2017,9 @@ async function simpleGrabar(){
     simpleEstado('Solicitando acceso al micrófono…', true);
     await askPermission();
     if (!micSeleccionado()){
-      simpleError('No se pudo acceder al micrófono. Revise el permiso del navegador.');
+      // askPermission ya dejo el motivo concreto (a veces con enlace): no se pisa
+      if ($('simpleErr').textContent) simpleEstado('Sin acceso al micrófono', false);
+      else simpleError('No se pudo acceder al micrófono. Revise el permiso del navegador.');
       return;
     }
   }
@@ -2358,6 +2380,7 @@ function init(){
   $('btnCam').onclick        = permitirCamara;
   $('simpleMic').onchange   = () => { $('micSel').value = $('simpleMic').value; };
   $('simpleRec').onclick    = simpleGrabar;
+  $('simplePermitir').onclick = simplePermitir;
   $('simpleStop').onclick   = simpleDetener;
   $('simpleCopiar').onclick = () => navigator.clipboard.writeText(S.tr.text)
     .then(() => { $('simpleCopiar').textContent = 'Copiado'; });

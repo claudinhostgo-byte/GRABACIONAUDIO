@@ -438,3 +438,4 @@ body.modo-vivo .shell{max-width:1040px}
 @media (prefers-reduced-motion: reduce){#vivoTemas li.recien{animation:none}}
 /* al terminar, sin el texto en vivo, los temas ocupan el ancho completo */
 #vivoCol.hidden + .col-panel{flex:1 1 auto}
+#simplePermitir{flex:0 0 auto}
