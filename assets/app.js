@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-3';
+const VERSION = '2026.10.09-4';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -671,7 +671,8 @@ const RANGO = { pend: 0, no: 0, parcial: 1, si: 2 };
 
 const V = {
   gen: 0,                 // cambia al reiniciar: descarta respuestas de una sesion anterior
-  activo: false, rec: null, simulador: 0, tokenTimer: 0,
+  activo: false, conectado: false, rec: null, simulador: 0, tokenTimer: 0,
+  previo: null,           // {tk, t}: token pedido al abrir la pantalla
   frases: [], parcial: '', t0: 0,
   temas: [],              // [{cumple, evidencia}] por tema, solo sube de nivel
   timer: 0, enCurso: false, pendiente: false, ultima: 0, revisadoHasta: 0
@@ -680,7 +681,7 @@ const V = {
 function vivoReiniciar(){
   V.gen++;
   V.frases = []; V.parcial = ''; V.ultima = 0; V.revisadoHasta = 0;
-  V.pendiente = false; V.enCurso = false;
+  V.pendiente = false; V.enCurso = false; V.conectado = false;
   clearTimeout(V.timer);
   V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
   $('vivoCol').classList.remove('hidden');
@@ -696,7 +697,8 @@ function pintarVivoTexto(){
   if (!V.frases.length && !V.parcial){
     const p = document.createElement('p');
     p.className = 'hint';
-    p.textContent = V.activo ? 'Escuchando…' : 'El texto aparece aquí mientras se habla.';
+    p.textContent = !V.activo ? 'El texto aparece aquí mientras se habla.'
+                  : V.conectado ? 'Escuchando…' : 'Conectando con el servicio de voz…';
     caja.appendChild(p);
     return;
   }
@@ -843,6 +845,30 @@ async function pedirTokenVoz(){
   return d;
 }
 
+/**
+ * Deja el SDK descargado y un token en mano al abrir la pantalla. Sin esto,
+ * ambas cosas ocurrian recien al tocar Grabar y la primera frase aparecia con
+ * varios segundos de retraso. Si falla no pasa nada: vivoIniciar lo reintenta.
+ */
+async function vivoPreparar(){
+  if (!S.cfg.speechTokenUrl) return;
+  try {
+    const tk = await pedirTokenVoz();
+    V.previo = { tk, t: Date.now() };
+    if (!tk.mock) await cargarSdkVoz();
+  } catch (e){
+    console.warn('No se pudo preparar la transcripción en vivo', e);
+  }
+}
+
+/** Token preparado si sigue vigente con margen; si no, uno nuevo. */
+async function tokenVozVigente(){
+  const p = V.previo;
+  V.previo = null;                       // se usa una sola vez
+  if (p && Date.now() - p.t < 8 * 60 * 1000) return p.tk;
+  return pedirTokenVoz();
+}
+
 /** Arranca junto con la grabacion. Si falla, la grabacion sigue igual. */
 async function vivoIniciar(){
   vivoReiniciar();
@@ -855,9 +881,9 @@ async function vivoIniciar(){
     return;
   }
   try {
-    const tk = await pedirTokenVoz();
+    const tk = await tokenVozVigente();
     if (gen !== V.gen || !V.activo) return;
-    if (tk.mock){ vivoSimular(); return; }
+    if (tk.mock){ V.conectado = true; vivoSimular(); return; }
 
     const sdk = await cargarSdkVoz();
     if (gen !== V.gen || !V.activo) return;
@@ -878,6 +904,7 @@ async function vivoIniciar(){
       tk.phrases.forEach((f) => lista.addPhrase(f));
     }
 
+    rec.sessionStarted = () => { V.conectado = true; pintarVivoTexto(); };
     rec.recognizing = (s, e) => { V.parcial = e.result.text; pintarVivoTexto(); };
     rec.recognized  = (s, e) => {
       if (e.result.reason === sdk.ResultReason.RecognizedSpeech) vivoFrase(e.result.text);
@@ -2375,6 +2402,7 @@ function init(){
     document.body.classList.add('modo-vivo');
     document.title = 'Grabación en vivo';
     vivoReiniciar();
+    vivoPreparar();
   }
 
   // dentro de un marco sin cámara delegada, la ventana aparte es el camino:
@@ -2437,7 +2465,7 @@ function init(){
     $('simpleOut').classList.add('hidden');
     setMsg($('simpleErr'), '');
     $('simpleTimer').textContent = '00:00';
-    if (MODO_VIVO) vivoReiniciar();
+    if (MODO_VIVO){ vivoReiniciar(); vivoPreparar(); }
     simpleEstado('Listo para grabar', false);
     $('simpleRec').disabled = false;
   };
