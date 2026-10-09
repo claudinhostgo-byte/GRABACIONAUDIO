@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-4';
+const VERSION = '2026.10.09-5';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -652,13 +652,53 @@ async function evaluarGuion(){
 /* Temas que se marcan mientras se habla. Se envian como criterios al mismo
    /api/evaluar: un tema queda marcado solo si el modelo puede citar la frase
    que lo respalda, igual que en la revision del guion. */
+/* En vivo basta con que el tema se MENCIONE. `claves` marca el tema en el
+   acto, sin esperar al modelo, cuando aparece una de esas palabras (se compara
+   sin tildes ni mayusculas, por inicio de palabra). El modelo sigue revisando
+   para detectar menciones con otras palabras. */
 const TEMAS_VIVO = [
   { titulo: 'Créditos',
-    criterio: '¿Se habló de créditos con el cliente (por ejemplo un crédito preaprobado, ' +
-              'su monto, tasa, cuotas o condiciones)?' },
+    criterio: '¿Se mencionaron créditos en la conversación (por ejemplo un crédito ' +
+              'preaprobado, un préstamo, su monto, tasa, cuotas o condiciones)?',
+    claves: ['credito', 'prestamo', 'preaprobado', 'financiamiento'] },
   { titulo: 'Beneficios',
-    criterio: '¿Se habló de beneficios o ventajas disponibles para el cliente?' }
+    criterio: '¿Se mencionaron beneficios o ventajas para el cliente en la conversación?',
+    claves: ['beneficio', 'ventaja'] }
 ];
+
+const sinTildes = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** Indice de los temas pendientes que el texto menciona por palabra clave. */
+function temasPorClave(texto){
+  const palabras = sinTildes(texto).split(/[^a-z0-9]+/).filter(Boolean);
+  return TEMAS_VIVO.map((t, i) => i).filter((i) =>
+    V.temas[i].cumple !== 'si' &&
+    TEMAS_VIVO[i].claves.some((c) => palabras.some((w) => w.startsWith(c))));
+}
+
+/**
+ * Marca en el acto lo que se reconoce por palabra clave. `provisoria` indica
+ * que la cita viene de texto aun en reconocimiento: cuando llega la frase
+ * final, la cita se reemplaza por esa.
+ */
+function marcarPorClave(texto, provisoria){
+  let recien = -1, cambio = false;
+  temasPorClave(texto).forEach((i) => {
+    V.temas[i] = { cumple: 'si', evidencia: texto, provisoria };
+    recien = i; cambio = true;
+  });
+  if (!provisoria){
+    // la frase final reemplaza la cita provisoria que la anticipaba
+    const palabras = sinTildes(texto).split(/[^a-z0-9]+/);
+    V.temas.forEach((t, i) => {
+      if (t.provisoria && TEMAS_VIVO[i].claves.some((c) => palabras.some((w) => w.startsWith(c)))){
+        V.temas[i] = { cumple: 'si', evidencia: texto, provisoria: false };
+        cambio = true;
+      }
+    });
+  }
+  if (cambio) pintarTemasVivo(recien);
+}
 
 /* Version fija del SDK de voz para el navegador. Se carga solo en este modo. */
 const SDK_VOZ = 'https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.40.0' +
@@ -667,7 +707,6 @@ const SDK_VOZ = 'https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech
 const VIVO_PAUSA_MS   = 6000;    // separacion minima entre revisiones
 const VIVO_VENTANA    = 6000;    // caracteres finales que se revisan cada vez
 const VIVO_TOKEN_MS   = 9 * 60 * 1000;   // el token vence a los 10 minutos
-const RANGO = { pend: 0, no: 0, parcial: 1, si: 2 };
 
 const V = {
   gen: 0,                 // cambia al reiniciar: descarta respuestas de una sesion anterior
@@ -761,7 +800,14 @@ function vivoFrase(texto){
   V.frases.push({ texto, ms: performance.now() - V.t0 });
   V.parcial = '';
   pintarVivoTexto();
+  marcarPorClave(texto, false);
   vivoProgramar();
+}
+
+function vivoParcial(texto){
+  V.parcial = texto;
+  pintarVivoTexto();
+  marcarPorClave(texto, true);
 }
 
 /* Revisiones espaciadas: a lo mas una en curso y una cada VIVO_PAUSA_MS. Lo
@@ -804,9 +850,10 @@ async function vivoRevisar(){
     (d.resultados || []).forEach((r, k) => {
       const i = pendientes[k];
       if (i == null) return;
-      // un tema marcado no se desmarca: la frase ya se dijo
-      if ((RANGO[r.cumple] || 0) > (RANGO[V.temas[i].cumple] || 0)){
-        V.temas[i] = { cumple: r.cumple, evidencia: r.evidencia };
+      // en vivo basta la mencion: "parcial" tambien es check. Un tema
+      // marcado no se desmarca: la frase ya se dijo
+      if ((r.cumple === 'si' || r.cumple === 'parcial') && V.temas[i].cumple !== 'si'){
+        V.temas[i] = { cumple: 'si', evidencia: r.evidencia };
         recien = i;
       }
     });
@@ -905,7 +952,7 @@ async function vivoIniciar(){
     }
 
     rec.sessionStarted = () => { V.conectado = true; pintarVivoTexto(); };
-    rec.recognizing = (s, e) => { V.parcial = e.result.text; pintarVivoTexto(); };
+    rec.recognizing = (s, e) => vivoParcial(e.result.text);
     rec.recognized  = (s, e) => {
       if (e.result.reason === sdk.ResultReason.RecognizedSpeech) vivoFrase(e.result.text);
     };
@@ -954,8 +1001,7 @@ function vivoSimular(){
     if (!frase){ clearInterval(V.simulador); V.simulador = 0; return; }
     letras += 12;
     if (letras < frase.length){
-      V.parcial = frase.slice(0, letras);
-      pintarVivoTexto();
+      vivoParcial(frase.slice(0, letras));
     } else {
       vivoFrase(frase);
       i++; letras = 0;
