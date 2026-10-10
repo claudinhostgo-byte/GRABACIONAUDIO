@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.10-1';
+const VERSION = '2026.10.10-2';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1143,7 +1143,10 @@ function traspasarDato(c){
 
 function escucharRespuestaDynamics(){
   window.addEventListener('message', (ev) => {
-    if (!ORIGEN_PADRE || ev.origin !== ORIGEN_PADRE || ev.source !== window.parent) return;
+    // se valida el origen (el dominio de Dynamics) y no la ventana: en la
+    // interfaz unificada la respuesta la envia el iframe oculto donde corren
+    // los scripts del formulario, del mismo dominio pero distinto de parent
+    if (!ORIGEN_PADRE || ev.origin !== ORIGEN_PADRE) return;
     const m = ev.data;
     if (!m || m.tipo !== 'wit-dato-resultado') return;
     const c = DATOS_SOLICITUD.find((x) => x.id === m.campo);
@@ -2486,9 +2489,8 @@ async function continuarSimple(){
   simpleEstado('Listo', false);
   $('simpleRec').disabled = false;
   renderSimple(S.tr);
-  // la transcripcion final por hablante reemplaza al texto en vivo; los
-  // temas marcados quedan a la vista
-  if (MODO_VIVO) $('vivoCol').classList.add('hidden');
+  // en vivo la conversacion queda a la vista; la transcripcion final por
+  // hablante aparece debajo, junto a la revision del guion
 }
 
 /** Muestra la transcripción como una conversación, por hablante. */

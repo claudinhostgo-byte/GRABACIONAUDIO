@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.10-1";
+    var VERSION      = "2026.10.10-2";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -100,7 +100,7 @@ WIT.Grabacion = (function () {
     // formulario: cada uno tiene su instancia, identificada por el GUID del
     // registro, y todo lo que toca un iframe o un campo pasa por SU formContext.
     var _instancias = {};       // guid -> instancia (ver instanciaPara)
-    var _escuchando = false;
+    var _ventanasEscuchadas = [];   // ventanas con el listener de mensajes puesto
     var _conDataOnLoad = typeof WeakSet === "function" ? new WeakSet() : null;
     var MAX_ESCRITURAS = 4;     // reescrituras de una URL ajena antes de rendirse
     var CICLOS_SIN_IFRAME = 50; // ~1 min sin ver ningun iframe: se pausa el vigilante
@@ -211,6 +211,7 @@ WIT.Grabacion = (function () {
         var destino = inst.objetivos[nombreControl];
         var el = buscarIframe(inst, nombreControl);
         if (!el || !destino) { return false; }
+        try { escucharEn(el.ownerDocument.defaultView); } catch (e) {}
 
         var src = el.getAttribute("src") || "";
         var faltaAllow = el.getAttribute("allow") !== ALLOW;
@@ -339,10 +340,29 @@ WIT.Grabacion = (function () {
 
     // ---- transcripcion de vuelta ------------------------------------------
 
+    /**
+     * Escucha los mensajes del grabador en la ventana indicada.
+     *
+     * En la interfaz unificada este script NO corre en la ventana de la
+     * aplicacion sino en un iframe oculto propio (ClientApiWrapper). El
+     * grabador le escribe a SU ventana contenedora, que es la de la
+     * aplicacion: escuchar solo en `window` deja los mensajes sin destinatario.
+     * Por eso se escucha en la ventana duena de cada iframe del grabador.
+     */
+    function escucharEn(ventana) {
+        if (!ventana || _ventanasEscuchadas.indexOf(ventana) !== -1) { return; }
+        try {
+            ventana.addEventListener("message", alRecibirMensaje);
+            _ventanasEscuchadas.push(ventana);
+        } catch (e) {
+            // ventana de otro origen: no es la de Dynamics
+        }
+    }
+
     function escucharMensajes() {
-        if (_escuchando) { return; }
-        window.addEventListener("message", alRecibirMensaje);
-        _escuchando = true;
+        escucharEn(window);
+        try { escucharEn(window.parent); } catch (e) {}
+        try { escucharEn(window.top); } catch (e) {}
     }
 
     /**
