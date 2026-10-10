@@ -48,6 +48,18 @@ Funciona hoy y es la única forma de tener el grabador embebido. Si una actualiz
 plataforma lo rompe, el respaldo es el botón de cinta que abre el grabador en pestaña nueva
 (`WIT.Grabacion.abrirEnPestanaNueva`), que no depende de esto.
 
+## Varios formularios abiertos a la vez
+
+Dynamics mantiene vivos varios formularios en el mismo documento: el caso anterior en el
+historial, el de creación que pasa a edición al guardar, las sesiones múltiples. Todos comparten
+el recurso web, así que **el estado es por formulario**, identificado por el GUID del registro:
+cada uno monta solo sus propios iframes, y un mensaje del grabador (transcripción o dato
+confirmado) se escribe en el formulario cuyo iframe lo envió, nunca en "el último cargado".
+Con estado compartido, el grabador recargaba en ciclo alternando números de caso.
+
+El `id` que recibe la página sigue siendo el número de caso: es la carpeta donde se guardan las
+grabaciones, y cambiarlo dejaría huérfanas las existentes.
+
 ## Configuración
 
 En `https://make.powerapps.com`, entorno **demolegrand**, dentro de una solución **no

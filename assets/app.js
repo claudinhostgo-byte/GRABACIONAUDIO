@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.09-7';
+const VERSION = '2026.10.10-1';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';

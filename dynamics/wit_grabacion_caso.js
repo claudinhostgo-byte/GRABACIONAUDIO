@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.09-7";
+    var VERSION      = "2026.10.10-1";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -90,25 +90,45 @@ WIT.Grabacion = (function () {
         rut:      "wit_rut"
     };
 
-    var _formContext = null;
+    // ---- estado por formulario ---------------------------------------------
+    // Dynamics mantiene varios formularios vivos a la vez (el caso anterior en
+    // el historial, el de creacion que pasa a edicion al guardar, las sesiones
+    // multiples) y todos comparten ESTE modulo. Con estado global, el
+    // manejador de pestana de un caso terminaba escribiendo su URL en el
+    // iframe de otro, y el otro se la devolvia: el grabador recargaba en ciclo
+    // con numeros de caso distintos. Por eso no hay estado global del
+    // formulario: cada uno tiene su instancia, identificada por el GUID del
+    // registro, y todo lo que toca un iframe o un campo pasa por SU formContext.
+    var _instancias = {};       // guid -> instancia (ver instanciaPara)
     var _escuchando = false;
-    var _vigilante = null;      // intervalo que mantiene los iframes correctos
-    var _objetivos = [];        // [{destino, control}] a vigilar
-    var _montados = {};         // para no repetir el log de montaje
-    var _ciclos = 0;
-    var _casoActual = null;     // numero de caso que el vigilante esta sirviendo
-    var _escrituras = {};       // cuantas veces se escribio el src de cada control
-    var _guardado = null;       // cola de guardados: uno a la vez
-    var MAX_ESCRITURAS = 4;     // tope duro: ningun ciclo puede pasar de aqui
+    var _conDataOnLoad = typeof WeakSet === "function" ? new WeakSet() : null;
+    var MAX_ESCRITURAS = 4;     // reescrituras de una URL ajena antes de rendirse
+    var CICLOS_SIN_IFRAME = 50; // ~1 min sin ver ningun iframe: se pausa el vigilante
+
+    var GRABADORES = [
+        { tab: TAB_NAME,   control: IFRAME_NAME,   modo: null },
+        { tab: TAB_SIMPLE, control: IFRAME_SIMPLE, modo: "simple" },
+        { tab: TAB_VIVO,   control: IFRAME_VIVO,   modo: "vivo" }
+    ];
 
     // ---- utilidades --------------------------------------------------------
 
     function numeroDeCaso(formContext) {
-        var attr = formContext.getAttribute(CAMPO_NUMERO);
-        if (!attr) { return null; }
-        var valor = attr.getValue();
-        if (!valor) { return null; }
-        return String(valor).trim() || null;
+        try {
+            var attr = formContext.getAttribute(CAMPO_NUMERO);
+            var valor = attr && attr.getValue();
+            return valor ? (String(valor).trim() || null) : null;
+        } catch (e) {
+            return null;            // formulario ya descartado
+        }
+    }
+
+    function guidDe(formContext) {
+        try {
+            return String(formContext.data.entity.getId() || "").replace(/[{}]/g, "").toLowerCase();
+        } catch (e) {
+            return "";
+        }
     }
 
     /** modo: null (completa), "simple" o "vivo". */
@@ -120,18 +140,41 @@ WIT.Grabacion = (function () {
     }
 
     function obtenerTab(formContext, nombre) {
-        try { return formContext.ui.tabs.get(nombre || TAB_NAME); } catch (e) { return null; }
+        try { return formContext.ui.tabs.get(nombre); } catch (e) { return null; }
     }
 
-    function aviso(mensaje, nivel) {
+    function aviso(inst, mensaje, nivel) {
         try {
-            _formContext.ui.setFormNotification(mensaje, nivel || "INFO", "wit_grabacion");
+            inst.fc.ui.setFormNotification(mensaje, nivel || "INFO", "wit_grabacion");
             setTimeout(function () {
-                try { _formContext.ui.clearFormNotification("wit_grabacion"); } catch (e) {}
+                try { inst.fc.ui.clearFormNotification("wit_grabacion"); } catch (e) {}
             }, 8000);
         } catch (e) {
             console.log("WIT.Grabacion: " + mensaje);
         }
+    }
+
+    /**
+     * Instancia del formulario: su formContext, su caso y lo que vigila.
+     * Si el mismo registro se vuelve a cargar con otro formContext, la anterior
+     * se descarta; sus manejadores quedan inertes (ver vigente).
+     */
+    function instanciaPara(fc) {
+        var guid = guidDe(fc), caso = numeroDeCaso(fc);
+        if (!guid || !caso) { return null; }
+        var inst = _instancias[guid];
+        if (inst && inst.fc === fc && inst.caso === caso) { return inst; }
+        if (inst) { detener(inst); }
+        inst = { guid: guid, fc: fc, caso: caso, objetivos: {}, escrituras: {},
+                 vigilante: null, ciclosVacios: 0, guardado: null, tabsRegistradas: false };
+        _instancias[guid] = inst;
+        return inst;
+    }
+
+    /** Sigue siendo la instancia activa de su registro y su formulario no cambio. */
+    function vigente(inst) {
+        return _instancias[inst.guid] === inst &&
+               guidDe(inst.fc) === inst.guid && numeroDeCaso(inst.fc) === inst.caso;
     }
 
     function dosDigitos(n) { return (n < 10 ? "0" : "") + n; }
@@ -143,74 +186,51 @@ WIT.Grabacion = (function () {
 
     // ---- montaje del iframe ------------------------------------------------
 
-    /**
-     * Ubica el elemento iframe real. La interfaz unificada no garantiza que
-     * getObject() devuelva el iframe, ni que este en el DOM cuando corre
-     * OnLoad, asi que hay un segundo camino por src.
-     */
-    function buscarIframe(destino, nombreControl) {
-        var nombre = nombreControl || IFRAME_NAME;
-
-        // Solo a traves del control de ESTE formulario. Antes habia un respaldo
-        // que recorria document.getElementsByTagName("iframe") buscando por id
-        // o por src: con varios formularios vivos en el mismo DOM (multisesion,
-        // panel lateral), el vigilante de un caso encontraba el iframe de otro
-        // y le escribia su URL, y el vigilante del otro se la devolvia. El
-        // resultado era el iframe recargando en ciclo con numeros de caso
-        // distintos.
+    /** El iframe del control, buscado SOLO dentro del formulario de la instancia. */
+    function buscarIframe(inst, nombreControl) {
         try {
-            var c = _formContext && _formContext.getControl(nombre);
-            if (c && c.getObject) {
-                var o = c.getObject();
-                if (o) {
-                    if (o.tagName === "IFRAME") { return o; }
-                    // contenedor del propio control: la busqueda queda acotada a el
-                    if (o.querySelector) {
-                        var dentro = o.querySelector("iframe");
-                        if (dentro) { return dentro; }
-                    }
-                }
-            }
-        } catch (e) { /* el control no esta disponible todavia */ }
-
-        return null;
+            var c = inst.fc.getControl(nombreControl);
+            var o = c && c.getObject && c.getObject();
+            if (!o) { return null; }
+            if (o.tagName === "IFRAME") { return o; }
+            return (o.querySelector && o.querySelector("iframe")) || null;
+        } catch (e) {
+            return null;            // el control no esta disponible todavia
+        }
     }
 
     /**
-     * Asegura que el iframe tenga el atributo allow y la URL correcta.
+     * Asegura que el iframe tenga el atributo allow y la URL de su caso.
      *
-     * La interfaz unificada renderiza el contenido de una pestana recien
-     * cuando el usuario la abre, y al hacerlo aplica la URL configurada en el
-     * formulario (about:blank), descartando lo que se haya puesto antes. Por
-     * eso no basta con reintentar unos segundos tras el OnLoad: hace falta un
-     * vigilante que corrija el iframe cada vez que la UCI lo vuelva a armar.
+     * La interfaz unificada renderiza una pestana recien cuando se abre, y al
+     * hacerlo deja el iframe en about:blank. Rellenar un iframe en blanco es
+     * lo normal y no tiene tope. Lo que si tiene tope es reemplazar OTRA URL:
+     * si algo insiste en cambiarla, se avisa y se deja de pelear.
      */
-    function asegurarIframe(destino, nombreControl, forzar) {
-        var el = buscarIframe(destino, nombreControl);
-        if (!el) { return false; }
+    function asegurarIframe(inst, nombreControl) {
+        var destino = inst.objetivos[nombreControl];
+        var el = buscarIframe(inst, nombreControl);
+        if (!el || !destino) { return false; }
 
         var src = el.getAttribute("src") || "";
         var faltaAllow = el.getAttribute("allow") !== ALLOW;
         var faltaSrc = src !== destino;
+        if (!faltaAllow && !faltaSrc) { return true; }
 
-        if (!faltaAllow && !faltaSrc) { return true; }   // ya esta como debe
-
-        // El tope por control es la red de seguridad contra cualquier ciclo: si
-        // algo externo sigue reescribiendo el src, el script avisa y se rinde
-        // en vez de pelear indefinidamente. Lo que evita el ciclo entre dos
-        // formularios es que buscarIframe solo resuelve el iframe del control
-        // de ESTE formulario, nunca uno encontrado recorriendo el documento.
-        var n = _escrituras[nombreControl] || 0;
-        if (n >= MAX_ESCRITURAS) {
-            if (n === MAX_ESCRITURAS) {
-                _escrituras[nombreControl] = n + 1;
-                console.warn("WIT.Grabacion: " + nombreControl + " se reescribio " +
-                             MAX_ESCRITURAS + " veces; se deja de insistir. " +
-                             "src actual: " + src);
+        var enBlanco = !src || src === "about:blank";
+        if (!enBlanco && faltaSrc) {
+            var n = inst.escrituras[nombreControl] || 0;
+            if (n >= MAX_ESCRITURAS) {
+                if (n === MAX_ESCRITURAS) {
+                    inst.escrituras[nombreControl] = n + 1;
+                    console.warn("WIT.Grabacion: " + nombreControl + " del caso " + inst.caso +
+                                 " fue cambiado " + MAX_ESCRITURAS + " veces desde afuera; " +
+                                 "se deja de insistir. src actual: " + src);
+                }
+                return true;
             }
-            return true;
+            inst.escrituras[nombreControl] = n + 1;
         }
-        _escrituras[nombreControl] = n + 1;
 
         // El atributo allow SOLO aplica en una navegacion nueva: si falta, hay
         // que recargar el iframe o el microfono queda bloqueado aunque el
@@ -224,87 +244,97 @@ WIT.Grabacion = (function () {
         } else {
             el.setAttribute("src", destino);
         }
-
-        console.log("WIT.Grabacion: " + nombreControl + " montado (" + (n + 1) + "/" +
-                    MAX_ESCRITURAS + ")" + (faltaAllow ? " con recarga para aplicar allow" : "") +
-                    (src ? " | anterior: " + src.slice(0, 70) : ""));
+        console.log("WIT.Grabacion: " + nombreControl + " montado para " + inst.caso +
+                    (faltaAllow ? " (con recarga para aplicar allow)" : ""));
         return true;
+    }
+
+    function detener(inst) {
+        if (inst.vigilante) { clearInterval(inst.vigilante); inst.vigilante = null; }
     }
 
     /**
-     * Revisa periodicamente los iframes registrados. Es barato (un
-     * getElementById y dos lecturas de atributo) y hace el montaje inmune al
-     * momento en que la UCI decida renderizar o re-renderizar la pestana.
+     * Revisa periodicamente los iframes de UNA instancia. Es barato y hace el
+     * montaje inmune al momento en que la UCI renderice la pestana. Se pausa
+     * si la instancia deja de estar vigente o si pasa un rato sin ver ninguno
+     * de sus iframes (otra pestana abierta o formulario cerrado); abrir una
+     * pestana del grabador lo reanuda.
      */
-    function detenerVigilante() {
-        if (_vigilante) { clearInterval(_vigilante); _vigilante = null; }
-        _objetivos = [];
-        _montados = {};
-        _escrituras = {};
-        _ciclos = 0;
-    }
-
-    function vigilar() {
-        if (_vigilante) { return; }
-        _vigilante = setInterval(function () {
-            // si el formulario ya no es el de este caso, no hay nada que vigilar
-            if (!_formContext || numeroDeCaso(_formContext) !== _casoActual) {
-                detenerVigilante();
-                return;
+    function vigilar(inst) {
+        if (inst.vigilante) { return; }
+        inst.ciclosVacios = 0;
+        inst.vigilante = setInterval(function () {
+            if (!vigente(inst)) { detener(inst); return; }
+            var vistos = 0;
+            for (var nombre in inst.objetivos) {
+                if (asegurarIframe(inst, nombre)) { vistos++; }
             }
-            var pendientes = 0;
-            for (var i = 0; i < _objetivos.length; i++) {
-                if (!asegurarIframe(_objetivos[i].destino, _objetivos[i].control, false)) {
-                    pendientes++;
-                }
-            }
-            _ciclos++;
-            // tras un rato sin encontrar ninguno, se avisa una sola vez
-            if (_ciclos === 20 && pendientes === _objetivos.length) {
-                console.warn("WIT.Grabacion: los iframes no aparecen en el DOM. " +
-                             "Abra la pestana del grabador; si sigue en blanco, " +
-                             "revise que el control IFRAME exista en este formulario.");
-            }
+            inst.ciclosVacios = vistos ? 0 : inst.ciclosVacios + 1;
+            if (inst.ciclosVacios >= CICLOS_SIN_IFRAME) { detener(inst); }
         }, 1200);
     }
 
-    function montar(formContext, numeroCaso, nombreControl, modo) {
-        var nombre = nombreControl || IFRAME_NAME;
-        var control = formContext.getControl(nombre);
-        if (!control) {
-            // cada pestana es opcional: que falte una no es un error
-            return false;
-        }
+    /**
+     * Registra la URL del grabador en su control. setSrc va una sola vez por
+     * URL: repetirlo en cada cambio de pestana recargaba la pagina y cortaba
+     * una grabacion en curso.
+     */
+    function montar(inst, g) {
+        var control = null;
+        try { control = inst.fc.getControl(g.control); } catch (e) {}
+        if (!control) { return false; }     // cada pestana es opcional
 
-        var destino = urlGrabador(numeroCaso, modo);
-
-        // via soportada: deja la URL registrada en el control
-        try { control.setSrc(destino); } catch (e) {
-            console.error("WIT.Grabacion: setSrc fallo en " + nombre, e);
-        }
-
-        // se registra para que el vigilante lo mantenga correcto
-        var ya = false;
-        for (var i = 0; i < _objetivos.length; i++) {
-            if (_objetivos[i].control === nombre) {
-                _objetivos[i].destino = destino;
-                ya = true;
+        var destino = urlGrabador(inst.caso, g.modo);
+        if (inst.objetivos[g.control] !== destino) {
+            inst.objetivos[g.control] = destino;
+            inst.escrituras[g.control] = 0;
+            try { control.setSrc(destino); } catch (e) {
+                console.error("WIT.Grabacion: setSrc fallo en " + g.control, e);
             }
         }
-        if (!ya) { _objetivos.push({ destino: destino, control: nombre }); }
-
-        // un montaje explicito reinicia el contador y si puede cambiar la URL
-        _escrituras[nombre] = 0;
-        asegurarIframe(destino, nombre, true);
-        vigilar();
+        asegurarIframe(inst, g.control);
+        vigilar(inst);
         return true;
     }
 
-    /** Monta las pestanas que existan: completa, simplificada y en vivo. */
-    function montarTodo(formContext, numeroCaso) {
-        montar(formContext, numeroCaso, IFRAME_NAME, null);
-        montar(formContext, numeroCaso, IFRAME_SIMPLE, "simple");
-        montar(formContext, numeroCaso, IFRAME_VIVO, "vivo");
+    function mostrarPestanas(fc, visibles) {
+        GRABADORES.forEach(function (g) {
+            var t = obtenerTab(fc, g.tab);
+            if (t) { t.setVisible(visibles); }
+        });
+    }
+
+    /**
+     * Deja el formulario listo: pestanas visibles y grabadores montados para
+     * su caso. Es idempotente; se llama al cargar, al guardar y en cada
+     * recarga de datos, y solo actua si algo cambio.
+     */
+    function activar(fc) {
+        var esCreacion = false;
+        try { esCreacion = fc.ui.getFormType() === FORM_TYPE_CREATE; } catch (e) {}
+        var inst = esCreacion ? null : instanciaPara(fc);
+        if (!inst) {
+            // sin numero de caso todavia (formulario de creacion): nada que indexar
+            mostrarPestanas(fc, false);
+            return;
+        }
+
+        mostrarPestanas(fc, true);
+        escucharMensajes();
+        GRABADORES.forEach(function (g) { montar(inst, g); });
+
+        if (!inst.tabsRegistradas) {
+            inst.tabsRegistradas = true;
+            GRABADORES.forEach(function (g) {
+                var t = obtenerTab(fc, g.tab);
+                if (!t || !t.addTabStateChange) { return; }
+                t.addTabStateChange(function () {
+                    // un manejador de una instancia reemplazada no hace nada
+                    if (_instancias[inst.guid] !== inst) { return; }
+                    if (t.getDisplayState() === "expanded") { montar(inst, g); }
+                });
+            });
+        }
     }
 
     // ---- transcripcion de vuelta ------------------------------------------
@@ -315,23 +345,45 @@ WIT.Grabacion = (function () {
         _escuchando = true;
     }
 
+    /**
+     * La instancia cuyo iframe envio el mensaje. Es la unica forma segura de
+     * saber a que caso pertenece: con varios formularios vivos, "el ultimo
+     * cargado" puede ser otro.
+     */
+    function instanciaDeFuente(fuente) {
+        for (var guid in _instancias) {
+            var inst = _instancias[guid];
+            if (!vigente(inst)) { continue; }
+            for (var nombre in inst.objetivos) {
+                var el = buscarIframe(inst, nombre);
+                if (el && el.contentWindow === fuente) { return inst; }
+            }
+        }
+        return null;
+    }
+
     function alRecibirMensaje(ev) {
         // el remitente tiene que ser exactamente el grabador
         if (ev.origin !== BASE_URL) { return; }
         var d = ev.data;
-        if (!d || !_formContext) { return; }
+        if (!d || (d.tipo !== TIPO_DATO && d.tipo !== TIPO_MENSAJE)) { return; }
 
-        if (d.tipo === TIPO_DATO) {
-            escribirDato(d, ev.source);
+        var inst = instanciaDeFuente(ev.source);
+        if (!inst) {
+            console.warn("WIT.Grabacion: mensaje de un grabador que no pertenece a ningun " +
+                         "formulario abierto; se ignora.");
             return;
         }
-        if (d.tipo !== TIPO_MENSAJE) { return; }
 
+        if (d.tipo === TIPO_DATO) {
+            escribirDato(inst, d, ev.source);
+            return;
+        }
         try {
-            escribirTranscripcion(d);
+            escribirTranscripcion(inst, d);
         } catch (e) {
             console.error("WIT.Grabacion: fallo al escribir la transcripcion", e);
-            aviso("No se pudo escribir la transcripcion en el caso: " + e.message, "ERROR");
+            aviso(inst, "No se pudo escribir la transcripcion en el caso: " + e.message, "ERROR");
         }
     }
 
@@ -344,15 +396,15 @@ WIT.Grabacion = (function () {
     }
 
     /** Guarda de a uno: tres OK seguidos no deben pisarse entre si. */
-    function guardarEnCola() {
-        var anterior = _guardado || Promise.resolve();
-        _guardado = anterior.then(function () {}, function () {}).then(function () {
-            return _formContext.data.save();
+    function guardarEnCola(inst) {
+        var anterior = inst.guardado || Promise.resolve();
+        inst.guardado = anterior.then(function () {}, function () {}).then(function () {
+            return inst.fc.data.save();
         });
-        return _guardado;
+        return inst.guardado;
     }
 
-    function escribirDato(d, fuente) {
+    function escribirDato(inst, d, fuente) {
         function responder(ok, error) {
             try {
                 fuente.postMessage({ tipo: TIPO_DATO_RESULTADO, campo: d.campo,
@@ -364,7 +416,7 @@ WIT.Grabacion = (function () {
 
         // el dato tiene que ser de ESTE caso: si el formulario cambio de
         // registro mientras tanto, se rechaza en vez de escribirlo en otro
-        if (!_casoActual || idSeguro(d.recordId) !== idSeguro(_casoActual)) {
+        if (idSeguro(d.recordId) !== idSeguro(inst.caso)) {
             responder(false, "El formulario ya no muestra el caso de esta grabacion.");
             return;
         }
@@ -372,7 +424,7 @@ WIT.Grabacion = (function () {
         var nombre = CAMPOS_DATOS[d.campo];
         if (!nombre) { responder(false, "Campo desconocido: " + d.campo); return; }
 
-        var attr = _formContext.getAttribute(nombre);
+        var attr = inst.fc.getAttribute(nombre);
         if (!attr) {
             responder(false, "El campo " + nombre + " no esta en el formulario del caso.");
             return;
@@ -398,27 +450,27 @@ WIT.Grabacion = (function () {
 
         // si el guardado falla, el valor igual queda en el formulario y el
         // usuario puede guardar a mano
-        guardarEnCola().then(
+        guardarEnCola(inst).then(
             function () { responder(true); },
             function (err) {
                 var msg = err && err.message ? err.message : "error desconocido";
-                aviso("El dato quedo en el formulario pero no se pudo guardar: " + msg +
+                aviso(inst, "El dato quedo en el formulario pero no se pudo guardar: " + msg +
                       ". Guarde el caso manualmente.", "WARNING");
                 responder(false, "quedo en el formulario pero no se pudo guardar (" + msg + ")");
             }
         );
     }
 
-    function escribirTranscripcion(datos) {
+    function escribirTranscripcion(inst, datos) {
         var texto = String(datos.texto || "").trim();
         if (!texto) {
-            aviso("La transcripcion llego vacia; no se escribio nada.", "WARNING");
+            aviso(inst, "La transcripcion llego vacia; no se escribio nada.", "WARNING");
             return;
         }
 
-        var attr = _formContext.getAttribute(CAMPO_DESTINO);
+        var attr = inst.fc.getAttribute(CAMPO_DESTINO);
         if (!attr) {
-            aviso("El campo Descripcion no esta en el formulario, no se puede escribir la " +
+            aviso(inst, "El campo Descripcion no esta en el formulario, no se puede escribir la " +
                   "transcripcion. Agreguelo al formulario.", "ERROR");
             return;
         }
@@ -427,7 +479,7 @@ WIT.Grabacion = (function () {
 
         // idempotencia: si este mismo audio ya se escribio, no duplicar
         if (datos.blobName && actual.indexOf(datos.blobName) !== -1) {
-            aviso("Esta grabacion ya estaba registrada en la descripcion.", "INFO");
+            aviso(inst, "Esta grabacion ya estaba registrada en la descripcion.", "INFO");
             return;
         }
 
@@ -452,10 +504,10 @@ WIT.Grabacion = (function () {
 
         // el guardado deja el dato en Dataverse; si falla, el texto sigue en el
         // formulario y el usuario puede guardar a mano
-        guardarEnCola().then(
-            function () { aviso("Transcripcion agregada a la descripcion del caso.", "INFO"); },
+        guardarEnCola(inst).then(
+            function () { aviso(inst, "Transcripcion agregada a la descripcion del caso.", "INFO"); },
             function (err) {
-                aviso("La transcripcion quedo en el formulario pero no se pudo guardar: " +
+                aviso(inst, "La transcripcion quedo en el formulario pero no se pudo guardar: " +
                       (err && err.message ? err.message : "error desconocido") +
                       ". Guarde el caso manualmente.", "WARNING");
             }
@@ -466,52 +518,23 @@ WIT.Grabacion = (function () {
 
     function onLoad(executionContext) {
         console.log("WIT.Grabacion: recurso web version " + VERSION);
-        // cada carga empieza de cero: si quedaron objetivos de otro registro, el
-        // vigilante seguiria persiguiendo una URL que ya no corresponde
-        detenerVigilante();
-        _formContext = executionContext.getFormContext();
-        var tabs = [
-            { tab: obtenerTab(_formContext, TAB_NAME),   control: IFRAME_NAME,   modo: null },
-            { tab: obtenerTab(_formContext, TAB_SIMPLE), control: IFRAME_SIMPLE, modo: "simple" },
-            { tab: obtenerTab(_formContext, TAB_VIVO),   control: IFRAME_VIVO,   modo: "vivo" }
-        ];
-        var esCreacion = _formContext.ui.getFormType() === FORM_TYPE_CREATE;
-        var numeroCaso = numeroDeCaso(_formContext);
-
-        if (esCreacion || !numeroCaso) {
-            tabs.forEach(function (t) { if (t.tab) { t.tab.setVisible(false); } });
-            return;
-        }
-
-        _casoActual = numeroCaso;
-        escucharMensajes();
-
-        tabs.forEach(function (t) {
-            if (!t.tab) { return; }
-            t.tab.setVisible(true);
-            montar(_formContext, numeroCaso, t.control, t.modo);
-            if (t.tab.addTabStateChange) {
-                t.tab.addTabStateChange(function () {
-                    if (t.tab.getDisplayState() === "expanded") {
-                        montar(_formContext, numeroCaso, t.control, t.modo);
-                    }
-                });
+        var fc = executionContext.getFormContext();
+        // La recarga de datos (tras guardar, incluido el primer guardado de un
+        // caso nuevo, que es cuando nace el numero) vuelve a activar el
+        // formulario. Se registra una sola vez por formulario.
+        try {
+            if (fc.data && fc.data.addOnLoad && (!_conDataOnLoad || !_conDataOnLoad.has(fc))) {
+                if (_conDataOnLoad) { _conDataOnLoad.add(fc); }
+                fc.data.addOnLoad(function () { activar(fc); });
             }
-        });
+        } catch (e) {
+            console.warn("WIT.Grabacion: no se pudo escuchar la recarga de datos", e);
+        }
+        activar(fc);
     }
 
     function onSave(executionContext) {
-        _formContext = executionContext.getFormContext();
-        if (_formContext.ui.getFormType() === FORM_TYPE_CREATE) { return; }
-        var numeroCaso = numeroDeCaso(_formContext);
-        if (!numeroCaso) { return; }
-        [TAB_NAME, TAB_SIMPLE, TAB_VIVO].forEach(function (n) {
-            var t = obtenerTab(_formContext, n);
-            if (t) { t.setVisible(true); }
-        });
-        _casoActual = numeroCaso;
-        escucharMensajes();
-        montarTodo(_formContext, numeroCaso);
+        activar(executionContext.getFormContext());
     }
 
     function abrirEnPestanaNueva(primaryControl) {
