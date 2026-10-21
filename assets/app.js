@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-9';
+const VERSION = '2026.10.21-10';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -843,12 +843,13 @@ function guiaPreaprobado(){
   g.appendChild(linea);
 
   // lo ofrecido en la conversacion, contra la guia
-  const of = V.datos && V.datos.montooferta;
-  if (of && of.valor){
+  // el valor vigente: lo que esta en pantalla, aunque aun no se confirme
+  const ofrecido = V.datos && V.datos.montooferta ? Number(valorVigente('montooferta')) : 0;
+  if (ofrecido > 0){
     const o = document.createElement('div');
-    o.className = 'tema-ofrecido' + (Number(of.valor) > Number(pre) ? ' supera' : '');
-    o.textContent = 'Ofrecido ' + formatoDato('monto', of.valor) +
-      (Number(of.valor) > Number(pre) ? ' · supera el preaprobado' : '');
+    o.className = 'tema-ofrecido' + (ofrecido > Number(pre) ? ' supera' : '');
+    o.textContent = 'Ofrecido ' + formatoDato('monto', ofrecido) +
+      (ofrecido > Number(pre) ? ' · supera el preaprobado' : '');
     g.appendChild(o);
   }
   return g;
@@ -858,6 +859,7 @@ function recibirContexto(c){
   const n = Number(c && c.preaprobado);
   CONTEXTO.preaprobado = n > 0 ? n : null;
   pintarTemasVivo(-1);
+  pintarSimulacion();
 }
 
 /** Pide el contexto al formulario; reintenta mientras el recurso web se engancha. */
@@ -1166,15 +1168,88 @@ function valorVigente(id){
   return d.valor;
 }
 
-/** La cuota que corresponde a monto, plazo y tasa vigentes, o null si falta alguno. */
-function cuotaCalculada(){
-  const monto = Number(valorVigente('montooferta'));
+/** Cuota fija de un monto con el plazo y la tasa vigentes, o null si falta alguno. */
+function cuotaPara(monto){
   const n = Number(valorVigente('plazo'));
   const tasa = valorVigente('tasa');
   if (!(monto > 0) || !(n > 0) || tasa == null || !(Number(tasa) >= 0)) return null;
   const i = Number(tasa) / 100;
   const cuota = i === 0 ? monto / n : monto * i / (1 - Math.pow(1 + i, -n));
   return Math.round(cuota);
+}
+
+/** La cuota que corresponde a monto oferta, plazo y tasa vigentes. */
+const cuotaCalculada = () => cuotaPara(Number(valorVigente('montooferta')));
+
+/* ---------- opciones de monto oferta ----------
+
+   A partir de lo que pide el cliente se proponen montos alrededor (catalogo:
+   opcionesMonto; por defecto -20 %, -7 %, igual, +7 % y +13 %, redondeados a
+   $100.000), para que el ejecutivo pueda ofrecer mas de lo solicitado. Cada
+   opcion muestra su cuota; las que superan el preaprobado se marcan. */
+function opcionesMonto(solicitado){
+  const cfg = (CATALOGO && CATALOGO.opcionesMonto) || {};
+  const factores = cfg.factores || [0.8, 0.93, 1, 1.07, 1.13];
+  // a escala del monto: con un redondeo fijo, los montos chicos repetian opciones
+  const red = Number(cfg.redondeo) ||
+    (solicitado < 1000000 ? 10000 : solicitado < 10000000 ? 100000 : 500000);
+  const vistos = new Set();
+  return factores.map((f) => Math.round(solicitado * f / red) * red)
+    .filter((m) => m > 0 && !vistos.has(m) && vistos.add(m))
+    .sort((a, b) => a - b);
+}
+
+function elegirMontoOferta(m){
+  const d = V.datos.montooferta;
+  if (!d || d.estado === 'confirmado') return;
+  const inp = $('datoIn_montooferta');
+  inp.value = String(m);
+  inp.dispatchEvent(new Event('input'));
+}
+
+/**
+ * Monto oferta parte igual a lo solicitado, para que la cuota salga de
+ * inmediato. Solo si nadie lo fijo: lo dicho en la conversacion, lo corregido
+ * y lo confirmado mandan.
+ */
+function proponerMontoOferta(){
+  const sol = Number(valorVigente('monto'));
+  const d = V.datos && V.datos.montooferta;
+  if (!d || !(sol > 0)) return;
+  const libre = d.estado === 'vacio' || (d.estado === 'detectado' && d.origen === 'opcion');
+  if (!libre || d.valor === sol) return;
+  V.datos.montooferta = Object.assign(datoVacio(), { valor: sol, estado: 'detectado', origen: 'opcion' });
+  pintarDato(DATOS_SOLICITUD.find((x) => x.id === 'montooferta'));
+}
+
+function pintarOpcionesMonto(caja){
+  const sol = Number(valorVigente('monto'));
+  if (!(sol > 0)) return;
+  const elegido = Number(valorVigente('montooferta'));
+  const pre = CONTEXTO.preaprobado;
+  const titulo = document.createElement('div');
+  titulo.className = 'simulacion-nota opciones-titulo';
+  titulo.textContent = 'Opciones según lo solicitado (' + formatoDato('monto', sol) + '):';
+  const fila = document.createElement('div');
+  fila.className = 'opciones-monto';
+  opcionesMonto(sol).forEach((m) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const supera = pre && m > pre;
+    b.className = 'opcion-monto' + (m === elegido ? ' elegida' : '') + (supera ? ' supera' : '') +
+                  (m === sol ? ' solicitado' : '');
+    const v = document.createElement('span'); v.className = 'opcion-valor'; v.textContent = formatoDato('monto', m);
+    const c = cuotaPara(m);
+    const q = document.createElement('span'); q.className = 'opcion-cuota';
+    q.textContent = c == null ? '—' : formatoDato('monto', c);
+    b.append(v, q);
+    b.title = (m === sol ? 'Lo que pidió el cliente. ' : m > sol ? 'Más de lo solicitado. ' : 'Menos de lo solicitado. ') +
+              (c == null ? '' : 'Cuota ' + formatoDato('monto', c) + '. ') +
+              (supera ? 'Supera el preaprobado (' + formatoDato('monto', pre) + ').' : '');
+    b.onclick = () => elegirMontoOferta(m);
+    fila.appendChild(b);
+  });
+  caja.append(titulo, fila);
 }
 
 /**
@@ -1201,6 +1276,7 @@ function pintarSimulacion(){
   if (cuota == null){
     caja.classList.add('vacia');
     caja.textContent = 'Indique monto y número de cuotas para calcular la cuota.';
+    pintarOpcionesMonto(caja);
     return;
   }
   caja.classList.remove('vacia');
@@ -1215,6 +1291,7 @@ function pintarSimulacion(){
   nota.className = 'simulacion-nota';
   nota.textContent = 'Tasa ' + formatoDato('porcentaje', tasa) + ' mensual · sin seguros ni impuestos';
   caja.append(frase, nota);
+  pintarOpcionesMonto(caja);
 }
 
 function recalcularCuota(){
@@ -1374,6 +1451,9 @@ function pintarDato(c, recien, soloEstado){
   else if (d.estado === 'detectado' && c.tipo === 'rut' && !rutValido(d.valor)){
     texto = 'El dígito verificador no corresponde.'; clase = 'bad';
   }
+  else if (d.origen === 'opcion' && d.estado === 'detectado'){
+    texto = 'Igual a lo solicitado: elija otra opción arriba si corresponde.';
+  }
   else if (d.origen === 'defecto' && d.estado === 'detectado'){
     texto = 'Tasa por defecto de la campaña.';
   }
@@ -1400,7 +1480,8 @@ function pintarDato(c, recien, soloEstado){
   ev.classList.toggle('hidden', !d.evidencia || confirmado);
   actualizarContadores();
   if (c.id === 'montooferta') pintarTemasVivo(-1);
-  if (c.id === 'montooferta' || c.id === 'plazo' || c.id === 'tasa') recalcularCuota();
+  if (c.id === 'monto') proponerMontoOferta();
+  if (c.id === 'montooferta' || c.id === 'plazo' || c.id === 'tasa' || c.id === 'monto') recalcularCuota();
   box.title = d.evidencia ? 'Dicho en la conversación: «' + d.evidencia + '»' : '';
 }
 
