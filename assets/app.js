@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-7';
+const VERSION = '2026.10.21-8';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1134,12 +1134,60 @@ function leerDato(c, texto){
 function proponerDato(id, valor, evidencia){
   const d = V.datos[id];
   if (!d || (d.estado !== 'vacio' && d.estado !== 'detectado')) return;
+  // con monto, plazo y tasa la cuota se calcula: lo dicho no la reemplaza
+  if (id === 'valorcuota' && cuotaCalculada()) return;
   const c = DATOS_SOLICITUD.find((x) => x.id === id);
   const numerico = c.tipo === 'monto' || c.tipo === 'entero' || c.tipo === 'porcentaje';
   const nuevo = numerico ? Number(valor) : formatoDato(c.tipo, valor);
   if (d.estado === 'detectado' && String(d.valor) === String(nuevo)) return;
   V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado' });
   pintarDato(c, true);
+}
+
+/* ---------- valor cuota calculado ----------
+
+   Con monto oferta, plazo y tasa mensual, la cuota sale de la formula de cuota
+   fija (sistema frances): cuota = monto * i / (1 - (1 + i)^-n). Es una
+   referencia SIN seguros ni impuestos (desgravamen, timbres): la cuota real de
+   una simulacion oficial es mayor. Se propone como cualquier otro dato, con
+   OK, y no pisa una cuota corregida a mano o ya confirmada. */
+
+/** Valor vigente de un dato: lo que esta escrito si se esta corrigiendo. */
+function valorVigente(id){
+  const d = V.datos[id];
+  if (!d || d.estado === 'vacio') return null;
+  if (d.estado === 'editado'){
+    const c = DATOS_SOLICITUD.find((x) => x.id === id);
+    const r = leerDato(c, $('datoIn_' + id).value);
+    return r.error ? null : r.valor;
+  }
+  return d.valor;
+}
+
+/** La cuota que corresponde a monto, plazo y tasa vigentes, o null si falta alguno. */
+function cuotaCalculada(){
+  const monto = Number(valorVigente('montooferta'));
+  const n = Number(valorVigente('plazo'));
+  const tasa = valorVigente('tasa');
+  if (!(monto > 0) || !(n > 0) || tasa == null || !(Number(tasa) >= 0)) return null;
+  const i = Number(tasa) / 100;
+  const cuota = i === 0 ? monto / n : monto * i / (1 - Math.pow(1 + i, -n));
+  return Math.round(cuota);
+}
+
+function recalcularCuota(){
+  const d = V.datos && V.datos.valorcuota;
+  if (!d || d.estado === 'confirmado' || d.estado === 'editado') return;
+  const cuota = cuotaCalculada();
+  if (cuota == null){
+    // si dejo de haber datos para calcularla, la calculada ya no se sostiene
+    if (d.origen === 'calculo'){ V.datos.valorcuota = datoVacio(); pintarDato(DATOS_SOLICITUD.find((x) => x.id === 'valorcuota')); }
+    return;
+  }
+  if (d.origen === 'calculo' && d.valor === cuota) return;
+  V.datos.valorcuota = Object.assign(datoVacio(), { valor: cuota, estado: 'detectado', origen: 'calculo',
+    evidencia: null });
+  pintarDato(DATOS_SOLICITUD.find((x) => x.id === 'valorcuota'), true);
 }
 
 /* El RUT dicho con digitos se reconoce sin esperar al modelo; solo se acepta
@@ -1265,6 +1313,9 @@ function pintarDato(c, recien, soloEstado){
   else if (d.estado === 'detectado' && c.tipo === 'rut' && !rutValido(d.valor)){
     texto = 'El dígito verificador no corresponde.'; clase = 'bad';
   }
+  else if (d.origen === 'calculo' && d.estado === 'detectado'){
+    texto = 'Calculada con monto, plazo y tasa · sin seguros ni impuestos.';
+  }
   else if (confirmado){
     texto = { enviando: 'Traspasando al caso…',
               ok: '✓ En el caso',
@@ -1285,6 +1336,7 @@ function pintarDato(c, recien, soloEstado){
   ev.classList.toggle('hidden', !d.evidencia || confirmado);
   actualizarContadores();
   if (c.id === 'montooferta') pintarTemasVivo(-1);
+  if (c.id === 'montooferta' || c.id === 'plazo' || c.id === 'tasa') recalcularCuota();
   box.title = d.evidencia ? 'Dicho en la conversación: «' + d.evidencia + '»' : '';
 }
 
