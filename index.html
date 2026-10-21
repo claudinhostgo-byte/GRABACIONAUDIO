@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.10-2" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.21-1" />
 </head>
 <body>
 <div class="shell">
@@ -254,10 +254,22 @@
           <ol id="vivoTemas" class="criterios"></ol>
           <div id="vivoMsg" class="msg"></div>
 
-          <h3 class="trh">Datos de la solicitud</h3>
-          <p class="hint">Se completan solos cuando el cliente los dice. Revise, corrija si hace
-            falta y confirme con OK: recién ahí pasan al caso.</p>
+          <p class="hint">Los datos se completan solos cuando el cliente los dice. Revise,
+            corrija si hace falta y confirme con OK: recién ahí pasan al caso.</p>
           <div id="datosSolicitud" class="datos"></div>
+
+          <h3 class="trh">Clasificación de la atención</h3>
+          <div id="clasif" class="clasif">
+            <label for="clasifC">Clasificación</label><select id="clasifC"></select>
+            <label for="clasifM">Motivo</label><select id="clasifM"></select>
+            <label for="clasifS">Submotivo</label><select id="clasifS"></select>
+            <div class="clasif-acciones">
+              <button id="clasifProponer" class="ghost small" type="button">Proponer</button>
+              <button id="clasifOk" class="primary small" type="button">OK</button>
+            </div>
+            <div id="clasifEstado" class="dato-estado"></div>
+            <div id="clasifEv" class="crit-evidencia hidden"></div>
+          </div>
           <p class="conv-nota">Indicio automático sobre el contenido de la conversación.
             No evalúa a la persona ni reemplaza una revisión humana.</p>
         </aside>
@@ -380,6 +392,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.10-2"></script>
+<script src="assets/app.js?v=2026.10.21-1"></script>
 </body>
 </html>

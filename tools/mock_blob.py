@@ -81,6 +81,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._records()
         if ruta == "/extraer":
             return self._extraer()
+        if ruta == "/clasificar":
+            return self._clasificar()
         if ruta == "/speechtoken":
             # sin token: la pagina entiende que debe simular el reconocimiento
             return self._responder({"mock": True})
@@ -173,6 +175,14 @@ class Handler(BaseHTTPRequestHandler):
             v, cita = ultimo(claves, r"\$?\s?\d[\d.]{3,}")
             n = int(re.sub(r"\D", "", v)) if v else 0
             datos[campo] = {"valor": n, "evidencia": cita} if n else None
+        # nombre: "me llamo X Y Z" -> nombre y dos apellidos
+        cita = next((f for f in reversed(frases) if "me llamo" in f.lower()), None)
+        partes = re.sub(r"[.,]", "", cita.lower().split("me llamo", 1)[1]).split() if cita else []
+        for campo, i in (("nombre", 0), ("apellido_paterno", 1), ("apellido_materno", 2)):
+            datos[campo] = ({"valor": partes[i].capitalize(), "evidencia": cita}
+                            if len(partes) > i else None)
+        v, cita = ultimo(("telefono", "teléfono", "celular"), r"9[\d ]{8,12}")
+        datos["telefono"] = ({"valor": re.sub(r"\D", "", v), "evidencia": cita} if v else None)
         v, cita = ultimo(("rut",), r"\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]")
         if v:
             t = re.sub(r"[^\dkK]", "", v).upper()
@@ -181,6 +191,25 @@ class Handler(BaseHTTPRequestHandler):
             datos["rut"] = None
         print("  POST /extraer  %d campos simulados" % sum(1 for x in datos.values() if x), flush=True)
         return self._responder({"mock": True, "datos": datos, "modelo": "simulador"})
+
+    def _clasificar(self):
+        """Simulador de clasificacion: la primera opcion cuyo submotivo o motivo
+        aparece en el texto. No entiende nada."""
+        size = int(self.headers.get("Content-Length") or 0)
+        try:
+            req = json.loads(self.rfile.read(size) or b"{}")
+        except ValueError:
+            return self._fail(400, "InvalidInput", "JSON invalido.")
+        texto = (req.get("texto") or "").lower()
+        propuesta = None
+        for c, m, sm in req.get("opciones") or []:
+            claves = [w for w in sm.lower().replace("/", " ").split() if len(w) > 5]
+            if any(k in texto for k in claves) or m.lower() in texto:
+                propuesta = {"clasificacion": c, "motivo": m, "submotivo": sm,
+                             "evidencia": "(cita simulada)", "justificacion": "Resultado simulado."}
+                break
+        print("  POST /clasificar  %s" % ("con propuesta" if propuesta else "sin propuesta"), flush=True)
+        return self._responder({"mock": True, "propuesta": propuesta, "modelo": "simulador"})
 
     def _responder(self, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()

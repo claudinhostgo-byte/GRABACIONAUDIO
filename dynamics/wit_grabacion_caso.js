@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.10-2";
+    var VERSION      = "2026.10.21-1";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -85,9 +85,17 @@ WIT.Grabacion = (function () {
     // El prefijo (wit_) es el del publicador de la solucion: si el suyo es
     // otro, cambielo aqui. Los campos deben estar agregados al formulario.
     var CAMPOS_DATOS = {
-        monto:    "wit_montosolicitado",
-        ingresos: "wit_ingresosmensuales",
-        rut:      "wit_rut"
+        nombre:        "wit_nombre",
+        paterno:       "wit_apellidopaterno",
+        materno:       "wit_apellidomaterno",
+        rut:           "wit_rut",
+        telefono:      "wit_telefono",
+        monto:         "wit_montosolicitado",
+        ingresos:      "wit_ingresosmensuales",
+        // listas de opciones: llega el texto y se busca la opcion por su etiqueta
+        clasificacion: "wit_clasificacion",
+        motivo:        "wit_motivo",
+        submotivo:     "wit_submotivo"
     };
 
     // ---- estado por formulario ---------------------------------------------
@@ -415,6 +423,21 @@ WIT.Grabacion = (function () {
             .replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
     }
 
+    function sinTildes(t) {
+        return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
+    /** Valor de la opcion cuya etiqueta coincide, sin distinguir tildes ni mayusculas. */
+    function valorDeOpcion(attr, etiqueta) {
+        var buscada = sinTildes(etiqueta);
+        var opciones = attr.getOptions ? attr.getOptions() : [];
+        for (var i = 0; i < opciones.length; i++) {
+            if (sinTildes(opciones[i].text) === buscada) { return opciones[i].value; }
+        }
+        return null;
+    }
+
     /** Guarda de a uno: tres OK seguidos no deben pisarse entre si. */
     function guardarEnCola(inst) {
         var anterior = inst.guardado || Promise.resolve();
@@ -456,6 +479,13 @@ WIT.Grabacion = (function () {
             valor = Number(d.valor);
             if (!isFinite(valor)) { responder(false, "El valor no es un numero."); return; }
             if (tipo === "integer") { valor = Math.round(valor); }
+        } else if (tipo === "optionset") {
+            valor = valorDeOpcion(attr, d.valor);
+            if (valor === null) {
+                responder(false, "La opcion \"" + d.valor + "\" no existe en " + nombre +
+                          ". Revise que el catalogo coincida con Dynamics.");
+                return;
+            }
         } else {
             valor = String(d.valor == null ? "" : d.valor).trim();
         }

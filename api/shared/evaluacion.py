@@ -244,7 +244,11 @@ INSTRUCCIONES_EXTRAER = (
     "SOLO si el cliente los dijo de forma explícita:\n"
     "  monto_solicitado    monto del crédito que el cliente pide, en pesos chilenos\n"
     "  ingresos_mensuales  ingreso mensual del cliente, en pesos chilenos\n"
-    "  rut                 RUT chileno del cliente\n\n"
+    "  rut                 RUT chileno del cliente\n"
+    "  nombre              nombre(s) de pila del cliente, sin apellidos\n"
+    "  apellido_paterno    primer apellido del cliente\n"
+    "  apellido_materno    segundo apellido del cliente\n"
+    "  telefono            teléfono de contacto del cliente\n\n"
     "Reglas estrictas:\n"
     "1. Cada dato que entregues DEBE traer en \"evidencia\" la cita textual literal "
     "de la transcripción de donde sale. Si no puedes citar, el valor es null.\n"
@@ -255,14 +259,25 @@ INSTRUCCIONES_EXTRAER = (
     "4. Si un dato se dijo más de una vez, usa la última mención: suele ser una corrección.\n"
     "5. No confundas el monto solicitado con los ingresos ni con otras cifras "
     "(cuotas, plazos, tasas). Ante la duda, null.\n"
-    "6. La transcripción viene de reconocimiento de voz y puede tener errores.\n\n"
+    "6. Nombre y apellidos son los del CLIENTE, nunca los del ejecutivo que lo "
+    "atiende. Si el cliente dice su nombre completo, sepáralo: \"Juan Pérez Soto\" es "
+    "nombre Juan, apellido_paterno Pérez, apellido_materno Soto. Con mayúscula inicial.\n"
+    "7. Teléfono solo con dígitos, tal como se dictó (9 dígitos para un celular chileno: "
+    "\"nueve ocho siete...\" es 987...). No completes dígitos que faltan.\n"
+    "8. La transcripción viene de reconocimiento de voz y puede tener errores.\n\n"
     "Responde SOLO un objeto JSON con esta forma:\n"
     '{"monto_solicitado":{"valor":1500000,"evidencia":"cita"},'
     '"ingresos_mensuales":{"valor":null,"evidencia":null},'
-    '"rut":{"valor":"12345678-5","evidencia":"cita"}}'
+    '"rut":{"valor":"12345678-5","evidencia":"cita"},'
+    '"nombre":{"valor":"Juan","evidencia":"cita"},'
+    '"apellido_paterno":{"valor":"Pérez","evidencia":"cita"},'
+    '"apellido_materno":{"valor":null,"evidencia":null},'
+    '"telefono":{"valor":"987654321","evidencia":"cita"}}'
 )
 
-CAMPOS_EXTRAER = ("monto_solicitado", "ingresos_mensuales", "rut")
+CAMPOS_EXTRAER = ("monto_solicitado", "ingresos_mensuales", "rut",
+                  "nombre", "apellido_paterno", "apellido_materno", "telefono")
+CAMPOS_TEXTO = ("nombre", "apellido_paterno", "apellido_materno")
 _RUT_RE = re.compile(r"^(\d{1,8})-([\dK])$")
 
 
@@ -299,6 +314,27 @@ def _normalizar_monto(v):
     return n if n > 0 else None
 
 
+def _normalizar_nombre(v):
+    """Mayuscula inicial por palabra; descarta lo que no parece un nombre."""
+    t = re.sub(r"\s+", " ", str(v or "")).strip(" .,;")
+    if not t or len(t) > 60 or re.search(r"\d", t):
+        return None
+    minusculas = ("de", "del", "la", "las", "los", "y")
+    partes = [w if (i and w.lower() in minusculas) else w[:1].upper() + w[1:].lower()
+              for i, w in enumerate(t.split(" "))]
+    return " ".join(partes)
+
+
+def _normalizar_telefono(v):
+    """Digitos; un celular chileno de 9 digitos queda como +56 9 XXXX XXXX."""
+    d = re.sub(r"\D", "", str(v or ""))
+    if d.startswith("56") and len(d) == 11:
+        d = d[2:]
+    if len(d) == 9 and d.startswith("9"):
+        return "+56 9 %s %s" % (d[1:5], d[5:])
+    return d if 8 <= len(d) <= 12 else None
+
+
 def extraer(texto, campos=None):
     """Datos de la solicitud dichos en la conversacion. No persiste nada.
 
@@ -325,6 +361,10 @@ def extraer(texto, campos=None):
         evidencia = str(evidencia).strip() if evidencia else None
         if campo == "rut":
             valor = _normalizar_rut(crudo.get("valor"))
+        elif campo in CAMPOS_TEXTO:
+            valor = _normalizar_nombre(crudo.get("valor"))
+        elif campo == "telefono":
+            valor = _normalizar_telefono(crudo.get("valor"))
         else:
             valor = _normalizar_monto(crudo.get("valor"))
         if valor is None or not evidencia:
@@ -343,4 +383,71 @@ def extraer(texto, campos=None):
         "datos": salida,
         "modelo": deployment,
         "tokens": uso.get("total_tokens"),
+    }
+
+
+# ---- clasificacion de la atencion ------------------------------------------
+
+INSTRUCCIONES_CLASIFICAR = (
+    "Eres un asistente que clasifica conversaciones de atención a clientes de una "
+    "cooperativa financiera. Recibes la transcripción y una lista NUMERADA de "
+    "combinaciones posibles de Clasificación > Motivo > Submotivo.\n\n"
+    "Elige la combinación que mejor describe el motivo PRINCIPAL por el que el "
+    "cliente se contactó.\n\n"
+    "Reglas estrictas:\n"
+    "1. Solo puedes elegir un número de la lista. No inventes combinaciones.\n"
+    "2. \"evidencia\" DEBE ser una cita textual literal de la transcripción que "
+    "respalde la elección. Si ninguna combinación calza o no puedes citar, "
+    "responde opcion null.\n"
+    "3. Si se trataron varios temas, prima el que motivó el contacto; un "
+    "ofrecimiento hecho por el ejecutivo no es el motivo del cliente.\n"
+    "4. No evalúes a las personas.\n\n"
+    "Responde SOLO un objeto JSON con esta forma:\n"
+    '{"opcion":3,"evidencia":"cita literal","justificacion":"una frase breve"}'
+)
+
+
+def clasificar(texto, opciones):
+    """Elige una combinacion del catalogo que manda la pagina. No persiste nada.
+
+    `opciones` es una lista de [clasificacion, motivo, submotivo]. El modelo
+    solo puede devolver el numero de una de ellas, y sin cita no hay propuesta.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        raise ValueError("No hay transcripción que clasificar.")
+    texto = texto[-MAX_TEXTO:]
+
+    validas = []
+    for o in (opciones or [])[:200]:
+        if isinstance(o, (list, tuple)) and len(o) == 3 and all(str(x).strip() for x in o):
+            validas.append([str(x).strip() for x in o])
+    if not validas:
+        raise ValueError("No hay catálogo con el que clasificar.")
+
+    lista = "\n".join("%d. %s > %s > %s" % (i + 1, c, m, sm) for i, (c, m, sm) in enumerate(validas))
+    datos, uso, deployment = _chat(INSTRUCCIONES_CLASIFICAR,
+                                   "OPCIONES:\n%s\n\nTRANSCRIPCIÓN:\n%s" % (lista, texto))
+
+    propuesta = None
+    try:
+        n = int(datos.get("opcion"))
+    except (TypeError, ValueError):
+        n = 0
+    evidencia = datos.get("evidencia")
+    evidencia = str(evidencia).strip() if evidencia else None
+    if 1 <= n <= len(validas) and evidencia:
+        c, m, sm = validas[n - 1]
+        propuesta = {"clasificacion": c, "motivo": m, "submotivo": sm,
+                     "evidencia": evidencia,
+                     "justificacion": str(datos.get("justificacion") or "").strip() or None}
+
+    logging.info("Clasificacion: %s", "con propuesta" if propuesta else "sin propuesta")
+    return {
+        "mock": False,
+        "propuesta": propuesta,
+        "modelo": deployment,
+        "tokens": uso.get("total_tokens"),
+        "aviso": ("Propuesta automática a partir de la conversación. "
+                  "La decide la persona que atiende."),
     }

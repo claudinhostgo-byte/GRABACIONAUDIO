@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.10-2';
+const VERSION = '2026.10.21-1';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -29,6 +29,7 @@ const CFG_NUBE = {
   recUrl: '/api/records',
   evalUrl: '/api/evaluar',
   extraerUrl: '/api/extraer',
+  clasificarUrl: '/api/clasificar',
   speechTokenUrl: '/api/speechtoken',
   locale: 'es-CL',
   diarize: '0'
@@ -46,6 +47,7 @@ const CFG_LOCAL = {
   recUrl: 'http://localhost:5501/records',
   evalUrl: 'http://localhost:5501/evaluar',
   extraerUrl: 'http://localhost:5501/extraer',
+  clasificarUrl: 'http://localhost:5501/clasificar',
   speechTokenUrl: 'http://localhost:5501/speechtoken',
   locale: 'es-CL',
   diarize: '0'
@@ -245,6 +247,7 @@ function saveCfg(){
     recUrl:    S.cfg.recUrl,
     evalUrl:   S.cfg.evalUrl,
     extraerUrl:     S.cfg.extraerUrl,
+    clasificarUrl:  S.cfg.clasificarUrl,
     speechTokenUrl: S.cfg.speechTokenUrl,
     locale:    $('cfgLocale').value,
     diarize:   $('cfgDiarize').value
@@ -730,6 +733,8 @@ function vivoReiniciar(){
   V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
   DATOS_SOLICITUD.forEach((c) => { V.datos[c.id] = datoVacio(); });
   pintarDatos();
+  V.clasif = clasifVacia();
+  pintarSelectClasif();
   $('vivoCol').classList.remove('hidden');
   $('vivoAviso').classList.add('hidden');
   setMsg($('vivoMsg'), '');
@@ -919,9 +924,13 @@ async function revisarDatos(texto, gen){
    persona los confirma o corrige. Solo lo confirmado pasa al caso de
    Dynamics. Un campo corregido a mano no se vuelve a sobrescribir. */
 const DATOS_SOLICITUD = [
-  { id: 'monto',    clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto' },
-  { id: 'ingresos', clave: 'ingresos_mensuales', titulo: 'Ingresos mensuales', tipo: 'monto' },
-  { id: 'rut',      clave: 'rut',                titulo: 'RUT',                tipo: 'rut' }
+  { id: 'nombre',   clave: 'nombre',             titulo: 'Nombre',             tipo: 'texto', grupo: 'Datos del socio' },
+  { id: 'paterno',  clave: 'apellido_paterno',   titulo: 'Apellido paterno',   tipo: 'texto', grupo: 'Datos del socio' },
+  { id: 'materno',  clave: 'apellido_materno',   titulo: 'Apellido materno',   tipo: 'texto', grupo: 'Datos del socio' },
+  { id: 'rut',      clave: 'rut',                titulo: 'RUT',                tipo: 'rut',   grupo: 'Datos del socio' },
+  { id: 'telefono', clave: 'telefono',           titulo: 'Teléfono',           tipo: 'telefono', grupo: 'Datos del socio' },
+  { id: 'monto',    clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto', grupo: 'Datos de la solicitud' },
+  { id: 'ingresos', clave: 'ingresos_mensuales', titulo: 'Ingresos mensuales', tipo: 'monto', grupo: 'Datos de la solicitud' }
 ];
 const DATO_TRASPASO_MS = 15000;     // espera maxima de la respuesta de Dynamics
 
@@ -953,12 +962,22 @@ function rutValido(texto){
   return p.dv === (r === 11 ? '0' : r === 10 ? 'K' : String(r));
 }
 
+/** Telefono como +56 9 XXXX XXXX si es un celular chileno; si no, los digitos. */
+function formatoTelefono(texto){
+  let d = String(texto || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('56')) d = d.slice(2);
+  if (d.length === 9 && d.startsWith('9')) return '+56 9 ' + d.slice(1, 5) + ' ' + d.slice(5);
+  return d;
+}
+
 function formatoDato(tipo, valor){
   if (valor == null || valor === '') return '';
   if (tipo === 'rut'){
     const p = partesRut(valor);
     return p ? Number(p.cuerpo).toLocaleString('es-CL') + '-' + p.dv : String(valor);
   }
+  if (tipo === 'telefono') return formatoTelefono(valor);
+  if (tipo === 'texto') return String(valor).trim();
   return '$' + Number(valor).toLocaleString('es-CL');
 }
 
@@ -968,6 +987,17 @@ function leerDato(c, texto){
     if (!partesRut(texto)) return { error: 'Escriba el RUT con su dígito verificador, por ejemplo 12.345.678-5.' };
     if (!rutValido(texto)) return { error: 'El dígito verificador no corresponde a ese RUT.' };
     return { valor: formatoDato('rut', texto) };
+  }
+  if (c.tipo === 'texto'){
+    const t = String(texto || '').replace(/\s+/g, ' ').trim();
+    if (!t) return { error: 'Escriba el ' + c.titulo.toLowerCase() + '.' };
+    if (/\d/.test(t)) return { error: 'No debería llevar números.' };
+    return { valor: t };
+  }
+  if (c.tipo === 'telefono'){
+    const d = String(texto || '').replace(/\D/g, '');
+    if (d.length < 8 || d.length > 12) return { error: 'Escriba el teléfono con todos sus dígitos.' };
+    return { valor: formatoTelefono(d) };
   }
   const n = Number(String(texto || '').replace(/[^0-9]/g, ''));
   if (!n) return { error: 'Escriba un monto en pesos, mayor que cero.' };
@@ -979,7 +1009,7 @@ function proponerDato(id, valor, evidencia){
   const d = V.datos[id];
   if (!d || (d.estado !== 'vacio' && d.estado !== 'detectado')) return;
   const c = DATOS_SOLICITUD.find((x) => x.id === id);
-  const nuevo = c.tipo === 'rut' ? formatoDato('rut', valor) : Number(valor);
+  const nuevo = c.tipo === 'monto' ? Number(valor) : formatoDato(c.tipo, valor);
   if (d.estado === 'detectado' && String(d.valor) === String(nuevo)) return;
   V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado' });
   pintarDato(c, true);
@@ -999,7 +1029,15 @@ function pintarDatos(){
   const cont = $('datosSolicitud');
   if (!cont) return;
   cont.innerHTML = '';
+  let grupo = null;
   DATOS_SOLICITUD.forEach((c) => {
+    if (c.grupo !== grupo){
+      grupo = c.grupo;
+      const h = document.createElement('h3');
+      h.className = 'trh datos-grupo';
+      h.textContent = grupo;
+      cont.appendChild(h);
+    }
     const box = document.createElement('div');
     box.className = 'dato';
     box.id = 'dato_' + c.id;
@@ -1016,8 +1054,8 @@ function pintarDatos(){
     inp.type = 'text';
     inp.autocomplete = 'off';
     inp.spellcheck = false;
-    inp.inputMode = c.tipo === 'rut' ? 'text' : 'numeric';
-    inp.placeholder = c.tipo === 'rut' ? '12.345.678-5' : '$0';
+    inp.inputMode = c.tipo === 'monto' ? 'numeric' : c.tipo === 'telefono' ? 'tel' : 'text';
+    inp.placeholder = { rut: '12.345.678-5', monto: '$0', telefono: '+56 9 1234 5678' }[c.tipo] || '';
     inp.addEventListener('input', () => {
       const d = V.datos[c.id];
       if (d.estado === 'confirmado') return;
@@ -1059,7 +1097,7 @@ function pintarDato(c, recien, soloEstado){
   const est = $('datoEst_' + c.id), ev = $('datoEv_' + c.id);
 
   if (!soloEstado){
-    inp.value = c.tipo === 'rut' ? (d.valor || '') : formatoDato('monto', d.valor);
+    inp.value = c.tipo === 'monto' ? formatoDato('monto', d.valor) : (d.valor || '');
   }
   const confirmado = d.estado === 'confirmado';
   inp.readOnly = confirmado;
@@ -1067,21 +1105,20 @@ function pintarDato(c, recien, soloEstado){
   btn.className = confirmado ? 'ghost small' : 'primary small';
 
   box.className = 'dato' + (d.estado === 'detectado' ? ' detectado' : '') +
+                  (d.estado === 'editado' ? ' editado' : '') +
                   (confirmado ? ' confirmado' : '') + (recien ? ' recien' : '');
 
   let texto = '', clase = '';
   // un error de traspaso se explica abajo, junto a como reintentar
   if (d.error && !confirmado){ texto = d.error; clase = 'bad'; }
-  else if (d.estado === 'vacio') texto = 'Esperando que se mencione…';
-  else if (d.estado === 'detectado'){
-    if (c.tipo === 'rut' && !rutValido(d.valor)){
-      texto = 'Detectado: el dígito verificador no corresponde.'; clase = 'bad';
-    } else texto = 'Detectado: revise y confirme con OK.';
+  // vacio, detectado y corregido se leen en el color del borde: con siete
+  // campos, una linea de estado por campo no cabe
+  else if (d.estado === 'detectado' && c.tipo === 'rut' && !rutValido(d.valor)){
+    texto = 'El dígito verificador no corresponde.'; clase = 'bad';
   }
-  else if (d.estado === 'editado') texto = 'Corregido: confirme con OK.';
   else if (confirmado){
     texto = { enviando: 'Traspasando al caso…',
-              ok: 'Traspasado al caso ✓',
+              ok: '✓ En el caso',
               error: 'Confirmado, pero no llegó al caso: ' + (d.error || 'sin respuesta') +
                      '. Use Editar y OK para reintentar.',
               'sin-dynamics': 'Confirmado. Para traspasarlo al caso, use esta pantalla desde Dynamics.'
@@ -1095,7 +1132,9 @@ function pintarDato(c, recien, soloEstado){
   ev.textContent = !d.evidencia ? '' :
     (d.corregido ? 'Corregido a mano. En la conversación: ' : '') + '«' + d.evidencia + '»';
   ev.title = d.evidencia || '';
-  ev.classList.toggle('hidden', !d.evidencia);
+  // la cita importa mientras el dato espera revision; despues queda al pasar el mouse
+  ev.classList.toggle('hidden', !d.evidencia || confirmado);
+  box.title = d.evidencia ? 'Dicho en la conversación: «' + d.evidencia + '»' : '';
 }
 
 function confirmarDato(c){
@@ -1116,29 +1155,42 @@ function confirmarDato(c){
 /* Traspaso al caso: el formulario de Dynamics escribe el campo con la sesion
    del usuario y responde. Mismo canal y misma validacion de origen que la
    transcripcion. */
-function traspasarDato(c){
+/* Envios al caso pendientes de respuesta, por campo. Un envio nuevo del
+   mismo campo reemplaza al anterior. */
+const ENVIOS = {};
+
+/**
+ * Pide al formulario de Dynamics que escriba un campo del caso. Resuelve con
+ * {ok, error} cuando responde, o con error si no responde a tiempo. Fuera de
+ * Dynamics resuelve {sinDynamics: true}.
+ */
+function enviarACaso(campo, valor){
+  if (!EN_IFRAME || !ORIGEN_PADRE) return Promise.resolve({ ok: false, sinDynamics: true });
+  if (ENVIOS[campo]) ENVIOS[campo].resolver({ ok: false, error: 'reemplazado por un envío nuevo' });
+  return new Promise((resolver) => {
+    const envio = { resolver: (r) => { clearTimeout(envio.t); delete ENVIOS[campo]; resolver(r); } };
+    envio.t = setTimeout(() => envio.resolver({ ok: false,
+      error: 'Dynamics no respondió. ¿Está actualizado el recurso web?' }), DATO_TRASPASO_MS);
+    ENVIOS[campo] = envio;
+    try {
+      window.parent.postMessage({ tipo: 'wit-dato', recordId: S.id, campo, valor }, ORIGEN_PADRE);
+    } catch (e){
+      envio.resolver({ ok: false, error: e.message });
+    }
+  });
+}
+
+async function traspasarDato(c){
   const d = V.datos[c.id];
-  if (!EN_IFRAME || !ORIGEN_PADRE){
-    d.traspaso = 'sin-dynamics';
-    pintarDato(c);
-    return;
-  }
   d.traspaso = 'enviando';
   pintarDato(c);
   const valor = d.valor;
-  try {
-    window.parent.postMessage({ tipo: 'wit-dato', recordId: S.id, campo: c.id, valor }, ORIGEN_PADRE);
-  } catch (e){
-    d.traspaso = 'error'; d.error = e.message;
-    pintarDato(c);
-    return;
-  }
-  setTimeout(() => {
-    if (d.traspaso === 'enviando' && d.valor === valor){
-      d.traspaso = 'error'; d.error = 'Dynamics no respondió. ¿Está actualizado el recurso web?';
-      pintarDato(c);
-    }
-  }, DATO_TRASPASO_MS);
+  const r = await enviarACaso(c.id, valor);
+  // si mientras tanto se edito o se volvio a confirmar otro valor, este resultado ya no aplica
+  if (d.estado !== 'confirmado' || d.valor !== valor) return;
+  d.traspaso = r.sinDynamics ? 'sin-dynamics' : r.ok ? 'ok' : 'error';
+  d.error = r.ok || r.sinDynamics ? '' : (r.error || 'error desconocido');
+  pintarDato(c);
 }
 
 function escucharRespuestaDynamics(){
@@ -1148,14 +1200,162 @@ function escucharRespuestaDynamics(){
     // los scripts del formulario, del mismo dominio pero distinto de parent
     if (!ORIGEN_PADRE || ev.origin !== ORIGEN_PADRE) return;
     const m = ev.data;
-    if (!m || m.tipo !== 'wit-dato-resultado') return;
-    const c = DATOS_SOLICITUD.find((x) => x.id === m.campo);
-    const d = c && V.datos[c.id];
-    if (!d || d.estado !== 'confirmado') return;
-    d.traspaso = m.ok ? 'ok' : 'error';
-    d.error = m.ok ? '' : (m.error || 'error desconocido');
-    pintarDato(c);
+    if (!m || m.tipo !== 'wit-dato-resultado' || !ENVIOS[m.campo]) return;
+    ENVIOS[m.campo].resolver({ ok: !!m.ok, error: m.error });
   });
+}
+
+/* ---------- Clasificacion de la atencion (modo en vivo) ----------
+
+   Al terminar la conversacion (o con "Proponer" durante ella) se propone
+   Clasificacion > Motivo > Submotivo del catalogo, con la frase que lo
+   respalda. La persona puede cambiarlo; al dar OK se escribe en el caso.
+   El catalogo vive en assets/catalogo.json: la misma fuente con la que se
+   crean las opciones en Dynamics. */
+let CATALOGO = null;
+
+async function cargarCatalogo(){
+  try {
+    const r = await fetch('assets/catalogo.json?v=' + VERSION);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    CATALOGO = await r.json();
+  } catch (e){
+    CATALOGO = { clasificaciones: [] };
+    setMsg($('clasifEstado'), 'No se pudo cargar el catálogo de clasificación (' + e.message + ').', 'bad');
+  }
+  pintarSelectClasif();
+}
+
+/** Todas las combinaciones validas, para que el modelo elija una. */
+const opcionesCatalogo = () => (CATALOGO ? CATALOGO.clasificaciones : []).flatMap((c) =>
+  c.motivos.flatMap((m) => m.submotivos.map((sm) => [c.nombre, m.nombre, sm])));
+
+function llenarSelect(sel, valores, elegido){
+  sel.innerHTML = '';
+  const vacio = document.createElement('option');
+  vacio.value = ''; vacio.textContent = '— elegir —';
+  sel.appendChild(vacio);
+  valores.forEach((v) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  });
+  sel.value = valores.indexOf(elegido) !== -1 ? elegido : '';
+}
+
+/** Selectores en cascada: cada nivel solo ofrece lo que cabe bajo el anterior. */
+function pintarSelectClasif(){
+  const k = V.clasif || {};
+  const cs = (CATALOGO ? CATALOGO.clasificaciones : []);
+  llenarSelect($('clasifC'), cs.map((c) => c.nombre), k.clasificacion);
+  const c = cs.find((x) => x.nombre === $('clasifC').value);
+  llenarSelect($('clasifM'), c ? c.motivos.map((m) => m.nombre) : [], k.motivo);
+  const m = c && c.motivos.find((x) => x.nombre === $('clasifM').value);
+  llenarSelect($('clasifS'), m ? m.submotivos : [], k.submotivo);
+  pintarClasif();
+}
+
+function pintarClasif(){
+  const k = V.clasif;
+  if (!k) return;
+  const confirmado = k.estado === 'confirmado';
+  ['clasifC', 'clasifM', 'clasifS'].forEach((id) => { $(id).disabled = confirmado; });
+  $('clasifOk').textContent = confirmado ? 'Editar' : 'OK';
+  $('clasifOk').className = confirmado ? 'ghost small' : 'primary small';
+  $('clasifProponer').disabled = confirmado || k.pidiendo;
+  $('clasif').className = 'clasif' + (k.estado === 'propuesto' ? ' detectado' : '') +
+                          (confirmado ? ' confirmado' : '');
+
+  let texto = '', clase = '';
+  if (k.pidiendo) texto = 'Analizando la conversación…';
+  else if (k.error && !confirmado){ texto = k.error; clase = 'bad'; }
+  else if (k.estado === 'vacio') texto = 'Se propone al terminar la conversación, o con «Proponer».';
+  else if (k.estado === 'propuesto') texto = 'Propuesta: revise y confirme con OK.';
+  else if (k.estado === 'editado') texto = 'Elegida a mano: confirme con OK.';
+  else if (confirmado){
+    texto = { enviando: 'Traspasando al caso…', ok: 'Traspasada al caso ✓',
+              error: 'No llegó al caso: ' + (k.error || 'sin respuesta') + '. Use Editar y OK para reintentar.',
+              'sin-dynamics': 'Confirmada. Para traspasarla al caso, use esta pantalla desde Dynamics.'
+            }[k.traspaso] || 'Confirmada.';
+    clase = k.traspaso === 'ok' ? 'ok' : k.traspaso === 'error' ? 'bad' : '';
+  }
+  $('clasifEstado').textContent = texto;
+  $('clasifEstado').className = 'dato-estado' + (clase ? ' ' + clase : '');
+  $('clasifEv').textContent = k.evidencia ? '«' + k.evidencia + '»' : '';
+  $('clasifEv').title = k.evidencia || '';
+  $('clasifEv').classList.toggle('hidden', !k.evidencia || k.estado === 'editado');
+}
+
+const clasifVacia = () => ({ estado: 'vacio', clasificacion: '', motivo: '', submotivo: '',
+                             evidencia: null, traspaso: null, error: '', pidiendo: false });
+
+/** Pide la propuesta con TODA la conversacion: el motivo suele decirse al principio. */
+async function vivoClasificar(){
+  const k = V.clasif;
+  if (!k || k.estado === 'confirmado' || k.estado === 'editado' || k.pidiendo) return;
+  const texto = V.frases.map((f) => f.texto).join(' ');
+  if (!texto.trim()){ k.error = 'Todavía no hay conversación que clasificar.'; pintarClasif(); return; }
+  if (!S.cfg.clasificarUrl){ k.error = 'Falta el endpoint de clasificación.'; pintarClasif(); return; }
+  const gen = V.gen;
+  k.pidiendo = true; k.error = '';
+  pintarClasif();
+  try {
+    const d = await postJson(S.cfg.clasificarUrl, { texto, recordId: S.id, opciones: opcionesCatalogo() });
+    if (gen !== V.gen || V.clasif !== k) return;
+    k.pidiendo = false;
+    // si la persona eligio a mano mientras tanto, manda lo suyo
+    if (k.estado === 'editado' || k.estado === 'confirmado'){ pintarClasif(); return; }
+    if (!d.propuesta){
+      k.error = 'La conversación no calza con ninguna opción del catálogo: elija a mano.';
+    } else {
+      Object.assign(k, d.propuesta, { estado: 'propuesto', error: '' });
+      if (d.mock) k.evidencia = (k.evidencia || '') + ' (simulado)';
+    }
+    pintarSelectClasif();
+  } catch (e){
+    if (gen !== V.gen || V.clasif !== k) return;
+    k.pidiendo = false;
+    k.error = 'No se pudo proponer: ' + e.message;
+    pintarClasif();
+  }
+}
+
+function alCambiarClasif(nivel){
+  const k = V.clasif;
+  if (!k || k.estado === 'confirmado') return;
+  k.clasificacion = $('clasifC').value;
+  // cambiar un nivel invalida los de abajo si ya no caben
+  k.motivo = nivel === 'C' ? '' : $('clasifM').value;
+  k.submotivo = nivel === 'S' ? $('clasifS').value : '';
+  k.estado = 'editado'; k.error = '';
+  pintarSelectClasif();
+}
+
+async function confirmarClasif(){
+  const k = V.clasif;
+  if (k.estado === 'confirmado'){
+    k.estado = 'editado'; k.traspaso = null; k.error = '';
+    pintarClasif();
+    return;
+  }
+  if (!$('clasifC').value || !$('clasifM').value || !$('clasifS').value){
+    k.error = 'Elija clasificación, motivo y submotivo.';
+    pintarClasif();
+    return;
+  }
+  k.clasificacion = $('clasifC').value; k.motivo = $('clasifM').value; k.submotivo = $('clasifS').value;
+  k.estado = 'confirmado'; k.traspaso = 'enviando'; k.error = '';
+  pintarClasif();
+  const elegido = [k.clasificacion, k.motivo, k.submotivo].join('>');
+  const rs = await Promise.all([enviarACaso('clasificacion', k.clasificacion),
+                                enviarACaso('motivo', k.motivo),
+                                enviarACaso('submotivo', k.submotivo)]);
+  if (V.clasif !== k || k.estado !== 'confirmado' ||
+      [k.clasificacion, k.motivo, k.submotivo].join('>') !== elegido) return;
+  const fallo = rs.find((r) => !r.ok && !r.sinDynamics);
+  k.traspaso = rs[0].sinDynamics ? 'sin-dynamics' : fallo ? 'error' : 'ok';
+  k.error = fallo ? (fallo.error || 'error desconocido') : '';
+  pintarClasif();
 }
 
 function cargarSdkVoz(){
@@ -1276,12 +1476,16 @@ const GUION_SIMULADO = [
   'Claro, lo reviso. Por cierto, usted tiene un crédito preaprobado de consumo.',
   'No sabía, ¿y de cuánto sería?',
   'Se lo detallo enseguida. También tiene beneficios por ser socio en salud y educación.',
-  'Me interesa. ¿Me indica su RUT, por favor?',
+  'Me interesa. ¿Con quién tengo el gusto?',
+  'Me llamo Juan Pérez Soto.',
+  '¿Me indica su RUT, por favor?',
   'Sí, mi RUT es 12.345.678-5.',
   '¿Cuánto necesita solicitar?',
   'Necesito solicitar $2.000.000.',
   '¿Y cuáles son sus ingresos mensuales?',
   'Mi sueldo es de $850.000 al mes.',
+  '¿A qué teléfono lo podemos contactar?',
+  'Mi celular es 9 8765 4321.',
   'Perfecto, muchas gracias.'
 ];
 
@@ -1321,6 +1525,9 @@ function vivoDetener(){
   if (V.enCurso) V.pendiente = true;
   else { V.ultima = 0; vivoProgramar(); }
   pintarVivoTexto();
+  // la ultima frase llega como reconocida poco despues de detener
+  const gen = V.gen;
+  setTimeout(() => { if (gen === V.gen) vivoClasificar(); }, 1500);
 }
 
 /* ---------- Clip de evidencia ---------- */
@@ -2744,6 +2951,12 @@ function init(){
   }
   if (MODO_VIVO){
     escucharRespuestaDynamics();
+    cargarCatalogo();
+    $('clasifC').onchange = () => alCambiarClasif('C');
+    $('clasifM').onchange = () => alCambiarClasif('M');
+    $('clasifS').onchange = () => alCambiarClasif('S');
+    $('clasifProponer').onclick = vivoClasificar;
+    $('clasifOk').onclick = confirmarClasif;
     document.body.classList.add('modo-vivo');
     document.title = 'Grabación en vivo';
     vivoReiniciar();

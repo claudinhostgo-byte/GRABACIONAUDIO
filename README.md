@@ -23,7 +23,8 @@ api/                             managed functions de SWA (Python, modelo v1)
   transcribe/                    POST /api/transcribe
   speechtoken/                   POST /api/speechtoken (token de Speech para el modo en vivo)
   evaluar/                       POST /api/evaluar (revisión del guion y temas en vivo)
-  extraer/                       POST /api/extraer (monto, ingresos y RUT dichos en la conversación)
+  extraer/                       POST /api/extraer (datos del socio y de la solicitud dichos en la conversación)
+  clasificar/                    POST /api/clasificar (clasificación, motivo y submotivo según assets/catalogo.json)
   host.json, requirements.txt
 webapp/app.py                    servidor local de desarrollo (Flask, mismo origen)
 tools/mock_blob.py               emulador local de Blob + simulador de transcripción

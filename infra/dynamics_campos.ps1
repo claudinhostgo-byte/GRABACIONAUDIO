@@ -1,15 +1,20 @@
-<#
+﻿<#
 .SYNOPSIS
-  Crea en la tabla Caso (incident) los campos de los datos de la solicitud:
-  Monto solicitado, Ingresos mensuales y RUT.
+  Crea en la tabla Caso (incident) los campos que completa la pestaña en vivo:
+  datos del socio, datos de la solicitud y la clasificación de la atención.
 
 .DESCRIPTION
-  Usa la Web API de Dataverse con el token de la sesion de Azure CLI (az login),
-  asi que actua con los permisos de quien lo ejecuta (requiere rol de
-  personalizador del sistema). Es idempotente: un campo que ya existe no se toca.
+  Usa la Web API de Dataverse con el token de la sesión de Azure CLI (az login),
+  así que actúa con los permisos de quien lo ejecuta (requiere rol de
+  personalizador del sistema). Es idempotente: un campo que ya existe no se toca,
+  salvo las listas de opciones, a las que se agregan las opciones del catálogo
+  que les falten (assets/catalogo.json). Nunca borra opciones.
 
-  Los campos quedan en la solucion indicada y se publican. NO los agrega al
+  Los campos quedan en la solución indicada y se publican. NO los agrega al
   formulario: eso se hace en el diseñador (ver dynamics/README.md).
+
+  Guardado como UTF-8 con BOM: Windows PowerShell 5.1 lee un .ps1 sin BOM como
+  ANSI y las tildes de las etiquetas llegarían rotas a Dynamics.
 
 .EXAMPLE
   .\infra\dynamics_campos.ps1
@@ -18,7 +23,8 @@
 param(
     [string]$Org      = "https://demolegrand.crm2.dynamics.com",
     [string]$Solucion = "DemoLandingsWIT",
-    [string]$Prefijo  = "wit"
+    [string]$Prefijo  = "wit",
+    [string]$Catalogo = (Join-Path $PSScriptRoot "..\assets\catalogo.json")
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,62 +48,99 @@ function Etiqueta([string]$texto) {
                                 "Label" = $texto; "LanguageCode" = 3082 }) }
 }
 
+function Enviar([string]$metodo, [string]$uri, $cuerpo) {
+    $json = $cuerpo | ConvertTo-Json -Depth 12
+    Invoke-RestMethod -Method $metodo -Headers $cabeceras -ContentType "application/json; charset=utf-8" `
+        -Uri $uri -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
 $nivel = @{ "Value" = "None"; "CanBeChanged" = $true
             "ManagedPropertyLogicalName" = "canmodifyrequirementlevelsettings" }
 
+function CampoTexto([string]$schema, [string]$nombre, [string]$desc, [int]$largo, [string]$formato = "Text") {
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.StringAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "MaxLength" = $largo; "FormatName" = @{ "Value" = $formato } }
+}
+
+function CampoMoneda([string]$schema, [string]$nombre, [string]$desc) {
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.MoneyAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "PrecisionSource" = 2          # la precisión de la moneda del registro
+       "MinValue" = 0; "MaxValue" = 100000000000 }
+}
+
+function CampoLista([string]$schema, [string]$nombre, [string]$desc, [string[]]$opciones) {
+    $i = 0
+    $ops = @($opciones | ForEach-Object {
+        @{ "Value" = 100000000 + $i; "Label" = Etiqueta $_ }; $i++ })
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.PicklistAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "OptionSet" = @{ "@odata.type" = "Microsoft.Dynamics.CRM.OptionSetMetadata"
+                        "IsGlobal" = $false; "OptionSetType" = "Picklist"; "Options" = $ops } }
+}
+
+# ---- catálogo: las opciones de las tres listas salen de aquí ----------------
+$cat = Get-Content -Raw -Encoding UTF8 $Catalogo | ConvertFrom-Json
+$clasificaciones = @($cat.clasificaciones | ForEach-Object { $_.nombre }) | Select-Object -Unique
+$motivos         = @($cat.clasificaciones | ForEach-Object { $_.motivos } | ForEach-Object { $_.nombre }) | Select-Object -Unique
+$submotivos      = @($cat.clasificaciones | ForEach-Object { $_.motivos } | ForEach-Object { $_.submotivos }) | Select-Object -Unique
+$demo = if ($cat.demo) { " [catálogo de demo]" } else { "" }
+
+$origen = "confirmado desde la grabación en vivo."
 $campos = @(
-    @{
-        "@odata.type"   = "Microsoft.Dynamics.CRM.MoneyAttributeMetadata"
-        "SchemaName"    = "${Prefijo}_MontoSolicitado"
-        "DisplayName"   = Etiqueta "Monto solicitado"
-        "Description"   = Etiqueta "Monto del crédito que pide el cliente, confirmado desde la grabación en vivo."
-        "RequiredLevel" = $nivel
-        "PrecisionSource" = 2          # la precision de la moneda del registro
-        "MinValue" = 0; "MaxValue" = 100000000000
-    },
-    @{
-        "@odata.type"   = "Microsoft.Dynamics.CRM.MoneyAttributeMetadata"
-        "SchemaName"    = "${Prefijo}_IngresosMensuales"
-        "DisplayName"   = Etiqueta "Ingresos mensuales"
-        "Description"   = Etiqueta "Ingreso mensual del cliente, confirmado desde la grabación en vivo."
-        "RequiredLevel" = $nivel
-        "PrecisionSource" = 2
-        "MinValue" = 0; "MaxValue" = 100000000000
-    },
-    @{
-        "@odata.type"   = "Microsoft.Dynamics.CRM.StringAttributeMetadata"
-        "SchemaName"    = "${Prefijo}_Rut"
-        "DisplayName"   = Etiqueta "RUT"
-        "Description"   = Etiqueta "RUT del cliente (12.345.678-5), confirmado desde la grabación en vivo."
-        "RequiredLevel" = $nivel
-        "MaxLength"     = 12
-        "FormatName"    = @{ "Value" = "Text" }
-    }
+    (CampoMoneda "MontoSolicitado"   "Monto solicitado"   "Monto del crédito que pide el cliente, $origen"),
+    (CampoMoneda "IngresosMensuales" "Ingresos mensuales" "Ingreso mensual del cliente, $origen"),
+    (CampoTexto  "Rut"               "RUT"                "RUT del cliente (12.345.678-5), $origen" 12),
+    (CampoTexto  "Nombre"            "Nombre"             "Nombre del socio, $origen" 100),
+    (CampoTexto  "ApellidoPaterno"   "Apellido paterno"   "Apellido paterno del socio, $origen" 100),
+    (CampoTexto  "ApellidoMaterno"   "Apellido materno"   "Apellido materno del socio, $origen" 100),
+    (CampoTexto  "Telefono"          "Teléfono"           "Teléfono de contacto del socio, $origen" 20 "Phone"),
+    (CampoLista  "Clasificacion"     "Clasificación"      "Clasificación de la atención, $origen$demo" $clasificaciones),
+    (CampoLista  "Motivo"            "Motivo"             "Motivo de la atención, $origen$demo" $motivos),
+    (CampoLista  "Submotivo"         "Submotivo"          "Submotivo de la atención, $origen$demo" $submotivos)
 )
 
-$existentes = (Invoke-RestMethod -Headers $cabeceras -Uri (
-    "$api/EntityDefinitions(LogicalName='incident')/Attributes?`$select=LogicalName")).value.LogicalName
+$base = "$api/EntityDefinitions(LogicalName='incident')/Attributes"
+$existentes = (Invoke-RestMethod -Headers $cabeceras -Uri "$base`?`$select=LogicalName").value.LogicalName
 
-$creados = 0
+$cambios = 0
 foreach ($c in $campos) {
     $logico = $c.SchemaName.ToLower()
-    if ($existentes -contains $logico) {
+    if ($existentes -notcontains $logico) {
+        Enviar "Post" $base $c | Out-Null
+        Write-Host "  creado:    $logico"
+        $cambios++
+        continue
+    }
+    if ($c."@odata.type" -ne "Microsoft.Dynamics.CRM.PicklistAttributeMetadata") {
         Write-Host "  ya existe: $logico"
         continue
     }
-    $cuerpo = $c | ConvertTo-Json -Depth 10
-    Invoke-RestMethod -Method Post -Headers $cabeceras -ContentType "application/json; charset=utf-8" `
-        -Uri "$api/EntityDefinitions(LogicalName='incident')/Attributes" `
-        -Body ([System.Text.Encoding]::UTF8.GetBytes($cuerpo)) | Out-Null
-    Write-Host "  creado:    $logico"
-    $creados++
+    # lista existente: se agregan las opciones del catálogo que falten
+    $actual = Invoke-RestMethod -Headers $cabeceras -Uri (
+        "$base(LogicalName='$logico')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$expand=OptionSet")
+    $etiquetas = @($actual.OptionSet.Options | ForEach-Object { $_.Label.UserLocalizedLabel.Label })
+    $faltan = @($c.OptionSet.Options | ForEach-Object { $_.Label.LocalizedLabels[0].Label } |
+                Where-Object { $etiquetas -notcontains $_ })
+    foreach ($f in $faltan) {
+        Enviar "Post" "$api/InsertOptionValue" @{
+            "EntityLogicalName" = "incident"; "AttributeLogicalName" = $logico
+            "Label" = Etiqueta $f; "SolutionUniqueName" = $Solucion } | Out-Null
+        Write-Host "  opción agregada a ${logico}: $f"
+        $cambios++
+    }
+    if (-not $faltan.Count) { Write-Host "  ya existe: $logico (opciones al día)" }
 }
 
-if ($creados -gt 0) {
+if ($cambios -gt 0) {
     $xml = "<importexportxml><entities><entity>incident</entity></entities></importexportxml>"
     Invoke-RestMethod -Method Post -Headers $cabeceras -ContentType "application/json" `
         -Uri "$api/PublishXml" -Body (@{ ParameterXml = $xml } | ConvertTo-Json) | Out-Null
-    Write-Host "Publicado. Falta agregarlos al formulario del Caso (ver dynamics/README.md)."
+    Write-Host "Publicado. Falta agregar los campos nuevos al formulario del Caso (ver dynamics/README.md)."
 } else {
     Write-Host "Sin cambios."
 }

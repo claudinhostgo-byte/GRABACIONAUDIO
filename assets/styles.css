@@ -550,3 +550,41 @@ body.modo-vivo .dato .crit-evidencia{-webkit-line-clamp:1}
 }
 /* caso ya grabado (solo lectura): sin panel en vivo no hay alto que repartir */
 body.modo-vivo #simple:has(#vivo.hidden){min-height:0;grid-template-rows:none}
+
+/* ---------- datos del socio y clasificacion (modo en vivo) ---------- */
+body.modo-vivo #vivo .col-panel{flex:0 0 400px}
+body.modo-vivo .datos-grupo{margin:10px 0 4px}
+body.modo-vivo .datos .datos-grupo:first-child{margin-top:8px}
+body.modo-vivo .dato{padding:4px 8px}
+body.modo-vivo .dato-estado:empty{display:none}
+body.modo-vivo .dato.editado{border-color:var(--brand)}
+
+.clasif{display:grid;grid-template-columns:96px 1fr;gap:5px 8px;align-items:center;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px}
+.clasif label{font-size:12px;font-weight:600}
+.clasif select{height:28px;padding:2px 6px;font-size:12px}
+.clasif-acciones{grid-column:1 / -1;display:flex;gap:6px;justify-content:flex-end}
+.clasif .dato-estado,.clasif .crit-evidencia{grid-column:1 / -1;margin:0}
+.clasif .dato-estado:empty{display:none}
+.clasif.detectado{border-color:#b37800}
+.clasif.confirmado{border-color:var(--ok)}
+
+/* siete datos: dos columnas, etiqueta arriba del campo; el panel se desplaza
+   por dentro si aun asi no cabe, sin mover la conversacion */
+body.modo-vivo #vivo .col-panel{overflow-y:auto;min-height:0}
+body.modo-vivo .datos{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+body.modo-vivo .datos .datos-grupo{grid-column:1 / -1;margin:8px 0 0}
+body.modo-vivo .dato{display:block;padding:5px 7px;min-width:0}
+body.modo-vivo .dato label{display:block;margin:0 0 3px;font-size:11px;font-weight:600;color:var(--ink2)}
+body.modo-vivo .dato-fila{gap:5px}
+body.modo-vivo .dato-fila input{height:26px;font-size:12.5px}
+body.modo-vivo .dato-fila button{height:26px;min-width:0;padding:0 9px}
+body.modo-vivo .dato-estado,
+body.modo-vivo .dato .crit-evidencia{margin-top:3px}
+body.modo-vivo #vivo .col-panel > .trh{margin-top:10px}
+body.modo-vivo #vivo .col-panel > .trh:first-child{margin-top:0}
+/* el area en vivo mide lo que queda bajo la barra: asi el panel se desplaza
+   por dentro en vez de estirar la pagina */
+body.modo-vivo #vivo{height:calc(100vh - 70px)}
+body.embed.modo-vivo #vivo{height:calc(100vh - 62px)}
+@media (max-width: 900px){ body.modo-vivo #vivo, body.embed.modo-vivo #vivo{height:auto} }
