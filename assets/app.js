@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-3';
+const VERSION = '2026.10.21-4';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1093,7 +1093,11 @@ function normalizarDictadoRut(texto){
 
 function rutPorPatron(texto){
   const m = normalizarDictadoRut(texto).match(RUT_EN_TEXTO);
-  const valido = (m || []).reverse().find((x) => rutValido(x));
+  // sin guion ni puntos, 9 digitos seguidos pueden ser un celular ("987654321"):
+  // se exige forma de RUT de persona (no empieza con 9, cuerpo bajo 50 millones)
+  const plausible = (x) => /[-.]/.test(x) ||
+    (x[0] !== '9' && Number(partesRut(x).cuerpo) < 50000000);
+  const valido = (m || []).reverse().find((x) => rutValido(x) && plausible(x));
   if (valido) proponerDato('rut', valido, texto);
 }
 
