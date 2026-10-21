@@ -435,6 +435,13 @@ body.modo-vivo #vivo.hidden{display:none}
 #vivoTemas li.recien{animation:recien 1.6s ease-out}
 @keyframes recien{from{box-shadow:0 0 0 3px var(--ok)}to{box-shadow:0 0 0 0 transparent}}
 @media (prefers-reduced-motion: reduce){#vivoTemas li.recien{animation:none}}
+/* guia del credito: el preaprobado del caso y lo ofrecido en la conversacion */
+.tema-guia{margin-top:6px;padding:5px 8px;border-radius:var(--r);background:var(--brand-soft);
+  color:var(--ink);font-size:12px;line-height:1.4}
+.tema-guia strong{font-variant-numeric:tabular-nums}
+.tema-guia.vacia{background:var(--hover);color:var(--ink2);font-size:11px}
+.tema-ofrecido{margin-top:2px;font-size:11.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.tema-ofrecido.supera{color:var(--rec);font-weight:600}
 /* al terminar, sin el texto en vivo, los temas ocupan el ancho completo */
 #vivoCol.hidden + .col-panel{flex:1 1 auto}
 #simplePermitir{flex:0 0 auto}

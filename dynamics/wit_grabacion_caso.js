@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.21-4";
+    var VERSION      = "2026.10.21-5";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -80,6 +80,10 @@ WIT.Grabacion = (function () {
     var TIPO_MENSAJE = "wit-transcripcion";
     var TIPO_DATO = "wit-dato";
     var TIPO_DATO_RESULTADO = "wit-dato-resultado";
+    // contexto del caso que el grabador muestra como guia
+    var TIPO_CONTEXTO_PEDIR = "wit-contexto-pedir";
+    var TIPO_CONTEXTO = "wit-contexto";
+    var CAMPO_PREAPROBADO = "wit_creditopreaprobado";
 
     // Datos de la solicitud: campo de la pagina -> nombre logico en el caso.
     // El prefijo (wit_) es el del publicador de la solucion: si el suyo es
@@ -343,6 +347,7 @@ WIT.Grabacion = (function () {
 
         if (!inst.tabsRegistradas) {
             inst.tabsRegistradas = true;
+            vigilarContexto(inst);
             GRABADORES.forEach(function (g) {
                 var t = obtenerTab(fc, g.tab);
                 if (!t || !t.addTabStateChange) { return; }
@@ -403,7 +408,8 @@ WIT.Grabacion = (function () {
         // el remitente tiene que ser exactamente el grabador
         if (ev.origin !== BASE_URL) { return; }
         var d = ev.data;
-        if (!d || (d.tipo !== TIPO_DATO && d.tipo !== TIPO_MENSAJE)) { return; }
+        if (!d || (d.tipo !== TIPO_DATO && d.tipo !== TIPO_MENSAJE &&
+                   d.tipo !== TIPO_CONTEXTO_PEDIR)) { return; }
 
         var inst = instanciaDeFuente(ev.source);
         if (!inst) {
@@ -416,6 +422,10 @@ WIT.Grabacion = (function () {
             escribirDato(inst, d, ev.source);
             return;
         }
+        if (d.tipo === TIPO_CONTEXTO_PEDIR) {
+            enviarContexto(inst, ev.source);
+            return;
+        }
         try {
             escribirTranscripcion(inst, d);
         } catch (e) {
@@ -425,6 +435,33 @@ WIT.Grabacion = (function () {
     }
 
     // ---- datos de la solicitud --------------------------------------------
+
+    // ---- contexto del caso -------------------------------------------------
+
+    function enviarContexto(inst, ventana) {
+        var attr = null;
+        try { attr = inst.fc.getAttribute(CAMPO_PREAPROBADO); } catch (e) {}
+        try {
+            ventana.postMessage({ tipo: TIPO_CONTEXTO, recordId: inst.caso,
+                                  preaprobado: attr ? attr.getValue() : null }, BASE_URL);
+        } catch (e) {
+            console.warn("WIT.Grabacion: no se pudo enviar el contexto al grabador", e);
+        }
+    }
+
+    /** Si cambian el preaprobado en el formulario, los grabadores abiertos lo ven al tiro. */
+    function vigilarContexto(inst) {
+        var attr = null;
+        try { attr = inst.fc.getAttribute(CAMPO_PREAPROBADO); } catch (e) {}
+        if (!attr || !attr.addOnChange) { return; }
+        attr.addOnChange(function () {
+            if (_instancias[inst.guid] !== inst) { return; }
+            for (var nombre in inst.objetivos) {
+                var el = buscarIframe(inst, nombre);
+                if (el && el.contentWindow) { enviarContexto(inst, el.contentWindow); }
+            }
+        });
+    }
 
     /** Misma normalizacion que usa el grabador para el ID del caso. */
     function idSeguro(v) {

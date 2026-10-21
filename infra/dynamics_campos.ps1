@@ -126,6 +126,7 @@ $campos = @(
     (CampoLista  "Motivo"            "Motivo"             "Motivo de la atención, $origen$demo" $motivos),
     (CampoLista  "Submotivo"         "Submotivo"          "Submotivo de la atención, $origen$demo" $submotivos),
     (CampoLista  "ProductoOfrecido"  "Producto ofrecido"  "Producto de la oferta comercial, $origen$demo" $productos),
+    (CampoMoneda "CreditoPreaprobado" "Crédito preaprobado" "Monto preaprobado para el cliente; en producción lo carga la campaña. El grabador lo muestra como guía."),
     (CampoMoneda "MontoOferta"       "Monto oferta"       "Monto ofrecido al cliente, $origen"),
     (CampoEntero "PlazoMeses"        "Plazo (meses)"      "Plazo de la oferta en meses, $origen" 1 480),
     (CampoMoneda "ValorCuota"        "Valor cuota"        "Valor de la cuota mensual ofrecida, $origen"),

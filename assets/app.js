@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-4';
+const VERSION = '2026.10.21-5';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -664,10 +664,15 @@ async function evaluarGuion(){
    sin tildes ni mayusculas, por inicio de palabra). El modelo sigue revisando
    para detectar menciones con otras palabras. */
 const TEMAS_VIVO = [
-  { titulo: 'Créditos',
-    criterio: '¿Se mencionaron créditos en la conversación (por ejemplo un crédito ' +
-              'preaprobado, un préstamo, su monto, tasa, cuotas o condiciones)?',
-    claves: ['credito', 'prestamo', 'preaprobado', 'financiamiento'] },
+  /* Credito NO se marca por palabra clave: que alguien diga "credito" no es
+     una gestion. Se marca solo cuando el modelo constata una oferta o una
+     negociacion concreta, y "parcial" no cuenta. Lleva como guia el monto
+     preaprobado del caso. */
+  { titulo: 'Crédito ofrecido',
+    criterio: '¿Se ofreció o se negoció un crédito concreto con el cliente, hablando de su ' +
+              'monto, cuota, plazo, tasa o condiciones? Que alguien solo nombre la palabra ' +
+              '"crédito" o pregunte por uno NO basta: tiene que haber una oferta o una negociación.',
+    claves: [], soloSi: true, guia: 'preaprobado' },
   { titulo: 'Beneficios',
     criterio: '¿Se mencionaron beneficios o ventajas para el cliente en la conversación?',
     claves: ['beneficio', 'ventaja'] }
@@ -799,6 +804,8 @@ function pintarTemasVivo(recien){
     cab.appendChild(txt);
     li.appendChild(cab);
 
+    if (tema.guia === 'preaprobado') li.appendChild(guiaPreaprobado());
+
     if (r.evidencia){
       const ev = document.createElement('div');
       ev.className = 'crit-evidencia';
@@ -808,6 +815,61 @@ function pintarTemasVivo(recien){
     }
     ol.appendChild(li);
   });
+}
+
+/* ---------- contexto del caso: credito preaprobado ----------
+
+   El monto preaprobado viene del caso de Dynamics (en produccion lo pondria
+   la campana) y se muestra como guia para el ejecutivo. Fuera de Dynamics se
+   puede pasar en la URL (?preaprobado=400000) para probar. */
+const CONTEXTO = { preaprobado: null, pedido: false };
+
+function guiaPreaprobado(){
+  const g = document.createElement('div');
+  g.className = 'tema-guia';
+  const pre = CONTEXTO.preaprobado;
+  if (!pre){
+    g.classList.add('vacia');
+    g.textContent = 'Sin crédito preaprobado registrado en el caso.';
+    return g;
+  }
+  const linea = document.createElement('div');
+  linea.innerHTML = '';
+  const et = document.createElement('span'); et.textContent = 'Preaprobado ';
+  const v = document.createElement('strong'); v.textContent = formatoDato('monto', pre);
+  linea.appendChild(et); linea.appendChild(v);
+  g.appendChild(linea);
+
+  // lo ofrecido en la conversacion, contra la guia
+  const of = V.datos && V.datos.montooferta;
+  if (of && of.valor){
+    const o = document.createElement('div');
+    o.className = 'tema-ofrecido' + (Number(of.valor) > Number(pre) ? ' supera' : '');
+    o.textContent = 'Ofrecido ' + formatoDato('monto', of.valor) +
+      (Number(of.valor) > Number(pre) ? ' · supera el preaprobado' : '');
+    g.appendChild(o);
+  }
+  return g;
+}
+
+function recibirContexto(c){
+  const n = Number(c && c.preaprobado);
+  CONTEXTO.preaprobado = n > 0 ? n : null;
+  pintarTemasVivo(-1);
+}
+
+/** Pide el contexto al formulario; reintenta mientras el recurso web se engancha. */
+function pedirContexto(){
+  const qs = Number(new URLSearchParams(location.search).get('preaprobado'));
+  if (qs > 0){ recibirContexto({ preaprobado: qs }); return; }
+  if (!EN_IFRAME || !ORIGEN_PADRE) return;
+  let intentos = 0;
+  const pedir = () => {
+    if (CONTEXTO.pedido || intentos++ >= 8) return;
+    try { window.parent.postMessage({ tipo: 'wit-contexto-pedir', recordId: S.id }, ORIGEN_PADRE); } catch (e) {}
+    setTimeout(pedir, 1500);
+  };
+  pedir();
 }
 
 function vivoFrase(texto){
@@ -898,7 +960,8 @@ async function revisarTemas(texto, gen){
     if (i == null) return;
     // en vivo basta la mencion: "parcial" tambien es check. Un tema
     // marcado no se desmarca: la frase ya se dijo
-    if ((r.cumple === 'si' || r.cumple === 'parcial') && V.temas[i].cumple !== 'si'){
+    const basta = r.cumple === 'si' || (r.cumple === 'parcial' && !TEMAS_VIVO[i].soloSi);
+    if (basta && V.temas[i].cumple !== 'si'){
       V.temas[i] = { cumple: 'si', evidencia: r.evidencia };
       recien = i;
     }
@@ -1221,6 +1284,7 @@ function pintarDato(c, recien, soloEstado){
   // la cita importa mientras el dato espera revision; despues queda al pasar el mouse
   ev.classList.toggle('hidden', !d.evidencia || confirmado);
   actualizarContadores();
+  if (c.id === 'montooferta') pintarTemasVivo(-1);
   box.title = d.evidencia ? 'Dicho en la conversación: «' + d.evidencia + '»' : '';
 }
 
@@ -1287,6 +1351,7 @@ function escucharRespuestaDynamics(){
     // los scripts del formulario, del mismo dominio pero distinto de parent
     if (!ORIGEN_PADRE || ev.origin !== ORIGEN_PADRE) return;
     const m = ev.data;
+    if (m && m.tipo === 'wit-contexto'){ CONTEXTO.pedido = true; recibirContexto(m); return; }
     if (!m || m.tipo !== 'wit-dato-resultado' || !ENVIOS[m.campo]) return;
     ENVIOS[m.campo].resolver({ ok: !!m.ok, error: m.error });
   });
@@ -3097,6 +3162,7 @@ function init(){
   }
   if (MODO_VIVO){
     escucharRespuestaDynamics();
+    pedirContexto();
     cargarCatalogo();
     $('clasifC').onchange = () => alCambiarClasif('C');
     $('clasifM').onchange = () => alCambiarClasif('M');
