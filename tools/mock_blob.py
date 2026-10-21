@@ -192,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             datos[campo] = {"valor": op, "evidencia": cita} if op else None
         for campo, claves, patron in (("monto_oferta", ("ofrec",), r"\$\s?\d[\d.]{3,}"),
                                       ("valor_cuota", ("cuota",), r"\$\s?\d[\d.]{3,}"),
-                                      ("plazo_meses", ("meses",), r"\d{1,3}(?= meses)"),
+                                      ("plazo_meses", ("meses", "cuotas"), r"\d{1,3}(?= (?:meses|cuotas))"),
                                       ("tasa", ("tasa",), r"\d+,\d+(?= ?%)"),
                                       ("cae", ("cae",), r"\d+,\d+(?= ?%)")):
             v, cita = ultimo(claves, patron)

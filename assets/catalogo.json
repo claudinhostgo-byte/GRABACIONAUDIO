@@ -94,5 +94,13 @@
     "Lo pensará",
     "Rechaza la oferta",
     "Pide nuevo contacto"
+  ],
+  "tasaPorDefecto": 1.48,
+  "plazosRapidos": [
+    12,
+    24,
+    36,
+    48,
+    60
   ]
 }

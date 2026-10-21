@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-8';
+const VERSION = '2026.10.21-9';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -738,6 +738,8 @@ function vivoReiniciar(){
   V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
   DATOS_SOLICITUD.forEach((c) => { V.datos[c.id] = datoVacio(); });
   pintarDatos();
+  aplicarTasaPorDefecto();
+  pintarSimulacion();
   V.clasif = clasifVacia();
   V.coment = comentVacio();
   pintarSelectClasif();
@@ -1002,7 +1004,7 @@ const DATOS_SOLICITUD = [
   { id: 'monto',     clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto',    pestana: 'oferta',  grupo: 'Lo que pide el cliente' },
   { id: 'producto',  clave: 'producto_ofrecido',  titulo: 'Producto ofrecido',  tipo: 'lista', lista: 'productos', pestana: 'oferta', grupo: 'Oferta presentada' },
   { id: 'montooferta', clave: 'monto_oferta',     titulo: 'Monto oferta',       tipo: 'monto',    pestana: 'oferta',  grupo: 'Oferta presentada' },
-  { id: 'plazo',     clave: 'plazo_meses',        titulo: 'Plazo (meses)',      tipo: 'entero',   pestana: 'oferta',  grupo: 'Oferta presentada' },
+  { id: 'plazo',     clave: 'plazo_meses',        titulo: 'N.º de cuotas (meses)', tipo: 'entero',   pestana: 'oferta',  grupo: 'Oferta presentada' },
   { id: 'valorcuota', clave: 'valor_cuota',       titulo: 'Valor cuota',        tipo: 'monto',    pestana: 'oferta',  grupo: 'Oferta presentada' },
   { id: 'tasa',      clave: 'tasa',               titulo: 'Tasa mensual',       tipo: 'porcentaje', pestana: 'oferta', grupo: 'Oferta presentada' },
   { id: 'cae',       clave: 'cae',                titulo: 'CAE',                tipo: 'porcentaje', pestana: 'oferta', grupo: 'Oferta presentada' },
@@ -1175,7 +1177,48 @@ function cuotaCalculada(){
   return Math.round(cuota);
 }
 
+/**
+ * Tasa de la campana precargada (catalogo: tasaPorDefecto) para que la cuota
+ * salga apenas hay monto y cuotas. Es una propuesta mas: se confirma con OK, se
+ * puede corregir, y si en la conversacion se dice otra tasa, gana la dicha.
+ */
+function aplicarTasaPorDefecto(){
+  const t = Number(CATALOGO && CATALOGO.tasaPorDefecto);
+  const d = V.datos && V.datos.tasa;
+  if (!(t > 0) || !d || d.estado !== 'vacio') return;
+  V.datos.tasa = Object.assign(datoVacio(), { valor: t, estado: 'detectado', origen: 'defecto' });
+  pintarDato(DATOS_SOLICITUD.find((x) => x.id === 'tasa'));
+}
+
+/** La frase que el ejecutivo le dice al cliente, arriba de la pestana Oferta. */
+function pintarSimulacion(){
+  const caja = $('simulacion');
+  if (!caja) return;
+  caja.innerHTML = '';
+  const cuota = cuotaCalculada();
+  const monto = Number(valorVigente('montooferta')), n = Number(valorVigente('plazo'));
+  const tasa = valorVigente('tasa');
+  if (cuota == null){
+    caja.classList.add('vacia');
+    caja.textContent = 'Indique monto y número de cuotas para calcular la cuota.';
+    return;
+  }
+  caja.classList.remove('vacia');
+  const frase = document.createElement('div');
+  frase.className = 'simulacion-frase';
+  const b1 = document.createElement('strong'); b1.textContent = formatoDato('monto', monto);
+  const b2 = document.createElement('strong'); b2.textContent = n + ' cuotas';
+  const b3 = document.createElement('strong'); b3.className = 'simulacion-cuota';
+  b3.textContent = formatoDato('monto', cuota);
+  frase.append(b1, ' en ', b2, ' de ', b3);
+  const nota = document.createElement('div');
+  nota.className = 'simulacion-nota';
+  nota.textContent = 'Tasa ' + formatoDato('porcentaje', tasa) + ' mensual · sin seguros ni impuestos';
+  caja.append(frase, nota);
+}
+
 function recalcularCuota(){
+  pintarSimulacion();
   const d = V.datos && V.datos.valorcuota;
   if (!d || d.estado === 'confirmado' || d.estado === 'editado') return;
   const cuota = cuotaCalculada();
@@ -1269,6 +1312,24 @@ function pintarDatos(){
     fila.appendChild(btn);
     box.appendChild(fila);
 
+    if (c.id === 'plazo'){
+      const chips = document.createElement('div');
+      chips.className = 'chips';
+      ((CATALOGO && CATALOGO.plazosRapidos) || []).forEach((n) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'chip'; b.textContent = n;
+        b.title = n + ' cuotas';
+        b.onclick = () => {
+          const d = V.datos[c.id];
+          if (d.estado === 'confirmado') return;
+          inp.value = String(n);
+          inp.dispatchEvent(new Event('input'));
+        };
+        chips.appendChild(b);
+      });
+      box.appendChild(chips);
+    }
+
     const est = document.createElement('div');
     est.className = 'dato-estado';
     est.id = 'datoEst_' + c.id;
@@ -1312,6 +1373,9 @@ function pintarDato(c, recien, soloEstado){
   // campos, una linea de estado por campo no cabe
   else if (d.estado === 'detectado' && c.tipo === 'rut' && !rutValido(d.valor)){
     texto = 'El dígito verificador no corresponde.'; clase = 'bad';
+  }
+  else if (d.origen === 'defecto' && d.estado === 'detectado'){
+    texto = 'Tasa por defecto de la campaña.';
   }
   else if (d.origen === 'calculo' && d.estado === 'detectado'){
     texto = 'Calculada con monto, plazo y tasa · sin seguros ni impuestos.';
@@ -1433,6 +1497,7 @@ async function cargarCatalogo(){
     if (!r.ok) throw new Error('HTTP ' + r.status);
     CATALOGO = await r.json();
     pintarDatos();
+    aplicarTasaPorDefecto();
   } catch (e){
     CATALOGO = { clasificaciones: [] };
     setMsg($('clasifEstado'), 'No se pudo cargar el catálogo de clasificación (' + e.message + ').', 'bad');
