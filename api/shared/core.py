@@ -268,6 +268,18 @@ def listar_grabaciones(record_id, con_texto=True):
     return {"recordId": rid, "count": len(items), "items": items}
 
 
+# Vocabulario base del dominio. Medido con Azure Speech es-CL: sin esto, "mi
+# RUT" se transcribe como "mírate", "su RUT" como "surat" y "el RUT" como "el
+# rap"; los digitos llegan bien, pero se pierde la palabra que los identifica.
+FRASES_BASE = [
+    "RUT", "mi RUT", "su RUT", "el RUT", "el RUT del socio", "RUT del cliente",
+    "guion", "guion K", "dígito verificador",
+    "Coopeuch", "socio", "socia", "compra de cartera", "crédito de consumo",
+    "crédito preaprobado", "CAE", "carga anual equivalente", "tasa mensual",
+    "valor cuota", "renta líquida",
+]
+
+
 def vocabulario(extra=None):
     """Palabras y frases que sesgan el reconocimiento.
 
@@ -277,7 +289,7 @@ def vocabulario(extra=None):
     pueda ajustar sin tocar codigo ni volver a desplegar.
     """
     crudo = os.environ.get("SPEECH_PHRASES", "")
-    frases = []
+    frases = list(FRASES_BASE)
     for parte in crudo.replace("\n", ",").split(","):
         parte = parte.strip()
         if parte:

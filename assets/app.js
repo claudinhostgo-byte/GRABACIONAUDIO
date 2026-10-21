@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-2';
+const VERSION = '2026.10.21-3';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1082,8 +1082,17 @@ function proponerDato(id, valor, evidencia){
 /* El RUT dicho con digitos se reconoce sin esperar al modelo; solo se acepta
    si el digito verificador calza, para no confundirlo con otra cifra. */
 const RUT_EN_TEXTO = /\b\d{1,2}\.?\d{3}\.?\d{3}\s*-?\s*[\dkK]\b/g;
+/* Como llega el RUT desde Azure Speech: "12345678. Guión 5", "12.345.678 guion
+   ka". Se lleva a "12345678-5" antes de buscar; el digito verificador sigue
+   siendo el filtro contra cualquier otra cifra. */
+function normalizarDictadoRut(texto){
+  return String(texto)
+    .replace(/[.,]?\s*\b(gui[oó]n|raya)\b\s*/gi, '-')
+    .replace(/-\s*ka\b/gi, '-K');
+}
+
 function rutPorPatron(texto){
-  const m = String(texto).match(RUT_EN_TEXTO);
+  const m = normalizarDictadoRut(texto).match(RUT_EN_TEXTO);
   const valido = (m || []).reverse().find((x) => rutValido(x));
   if (valido) proponerDato('rut', valido, texto);
 }
