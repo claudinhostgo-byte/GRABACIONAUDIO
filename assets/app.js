@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-5';
+const VERSION = '2026.10.21-7';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -1353,7 +1353,16 @@ function escucharRespuestaDynamics(){
     const m = ev.data;
     if (m && m.tipo === 'wit-contexto'){ CONTEXTO.pedido = true; recibirContexto(m); return; }
     if (!m || m.tipo !== 'wit-dato-resultado' || !ENVIOS[m.campo]) return;
-    ENVIOS[m.campo].resolver({ ok: !!m.ok, error: m.error });
+    const envio = ENVIOS[m.campo];
+    if (m.ok){ clearTimeout(envio.tError); envio.resolver({ ok: true }); return; }
+    // un rechazo espera un momento: puede responder mas de una copia del
+    // script del formulario (al navegar entre casos queda viva la anterior) y
+    // el OK de la copia correcta siempre gana
+    if (!envio.tError){
+      envio.tError = setTimeout(() => {
+        if (ENVIOS[m.campo] === envio) envio.resolver({ ok: false, error: m.error });
+      }, 2000);
+    }
   });
 }
 

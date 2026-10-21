@@ -629,3 +629,9 @@ body.embed.modo-vivo #vivo{height:calc(100vh - 62px)}
   body.modo-vivo #vivo .columnas{flex-direction:row}
   body.modo-vivo #vivo .col-panel{width:auto}
 }
+/* comentarios: bloque propio a todo el ancho (no la grilla etiqueta/campo
+   de la clasificacion, que dejaba el texto en una columna de 96 px) */
+#coment{display:flex;flex-direction:column;gap:6px}
+#coment textarea{display:block;width:100%;box-sizing:border-box;min-width:0;min-height:110px;margin:0}
+#coment .clasif-acciones{justify-content:flex-start;align-items:center}
+#coment .dato-estado{margin:0}

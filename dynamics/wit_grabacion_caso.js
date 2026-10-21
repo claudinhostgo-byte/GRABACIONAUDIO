@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.21-5";
+    var VERSION      = "2026.10.21-7";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -503,10 +503,13 @@ WIT.Grabacion = (function () {
             }
         }
 
-        // el dato tiene que ser de ESTE caso: si el formulario cambio de
-        // registro mientras tanto, se rechaza en vez de escribirlo en otro
+        // el dato tiene que ser de ESTE caso. Si no lo es, se ignora sin
+        // responder: al navegar entre casos Dynamics puede dejar viva otra copia
+        // de este script (de otro registro) escuchando la misma ventana, y su
+        // rechazo le ganaba al OK de la copia correcta, que si lo escribio
         if (idSeguro(d.recordId) !== idSeguro(inst.caso)) {
-            responder(false, "El formulario ya no muestra el caso de esta grabacion.");
+            console.log("WIT.Grabacion: dato de " + d.recordId + " ignorado por la instancia de " +
+                        inst.caso + "; lo atiende el formulario de ese caso.");
             return;
         }
 
