@@ -241,14 +241,23 @@ def evaluar(texto, criterios=None):
 INSTRUCCIONES_EXTRAER = (
     "Eres un asistente que toma nota durante una conversación de atención a un "
     "cliente. Recibes la transcripción automática y debes extraer estos datos, "
-    "SOLO si el cliente los dijo de forma explícita:\n"
+    "SOLO si se dijeron de forma explícita. Los del cliente los dice el cliente; los "
+    "de la oferta los dice normalmente el ejecutivo al presentarla:\n"
     "  monto_solicitado    monto del crédito que el cliente pide, en pesos chilenos\n"
     "  ingresos_mensuales  ingreso mensual del cliente, en pesos chilenos\n"
     "  rut                 RUT chileno del cliente\n"
     "  nombre              nombre(s) de pila del cliente, sin apellidos\n"
     "  apellido_paterno    primer apellido del cliente\n"
     "  apellido_materno    segundo apellido del cliente\n"
-    "  telefono            teléfono de contacto del cliente\n\n"
+    "  telefono            teléfono de contacto del cliente\n"
+    "  producto_ofrecido   producto que el ejecutivo ofrece; SOLO uno de: {productos}\n"
+    "  monto_oferta        monto que el ejecutivo ofrece, en pesos chilenos\n"
+    "  plazo_meses         plazo de la oferta, en meses (\"tres años\" es 36)\n"
+    "  valor_cuota         valor de la cuota mensual ofrecida, en pesos chilenos\n"
+    "  tasa                tasa de interés mensual ofrecida, en porcentaje (\"uno coma "
+    "ochenta y nueve\" es 1.89)\n"
+    "  cae                 carga anual equivalente (CAE), en porcentaje\n"
+    "  respuesta_cliente   respuesta del cliente a la oferta; SOLO uno de: {respuestas}\n\n"
     "Reglas estrictas:\n"
     "1. Cada dato que entregues DEBE traer en \"evidencia\" la cita textual literal "
     "de la transcripción de donde sale. Si no puedes citar, el valor es null.\n"
@@ -257,14 +266,17 @@ INSTRUCCIONES_EXTRAER = (
     "3. RUT como cuerpo sin puntos, guion y dígito verificador: \"12345678-5\". "
     "La letra K va en mayúscula. No completes ni inventes dígitos que no se dijeron.\n"
     "4. Si un dato se dijo más de una vez, usa la última mención: suele ser una corrección.\n"
-    "5. No confundas el monto solicitado con los ingresos ni con otras cifras "
-    "(cuotas, plazos, tasas). Ante la duda, null.\n"
+    "5. No confundas las cifras entre sí: el monto que el cliente pide (monto_solicitado) "
+    "no es el que se le ofrece (monto_oferta), y ninguno es una cuota, un plazo, una tasa "
+    "ni un ingreso. Ante la duda, null.\n"
     "6. Nombre y apellidos son los del CLIENTE, nunca los del ejecutivo que lo "
     "atiende. Si el cliente dice su nombre completo, sepáralo: \"Juan Pérez Soto\" es "
     "nombre Juan, apellido_paterno Pérez, apellido_materno Soto. Con mayúscula inicial.\n"
     "7. Teléfono solo con dígitos, tal como se dictó (9 dígitos para un celular chileno: "
     "\"nueve ocho siete...\" es 987...). No completes dígitos que faltan.\n"
-    "8. La transcripción viene de reconocimiento de voz y puede tener errores.\n\n"
+    "8. producto_ofrecido y respuesta_cliente deben ser EXACTAMENTE uno de los textos "
+    "permitidos, o null. La respuesta es la ÚLTIMA postura del cliente frente a la oferta.\n"
+    "9. La transcripción viene de reconocimiento de voz y puede tener errores.\n\n"
     "Responde SOLO un objeto JSON con esta forma:\n"
     '{"monto_solicitado":{"valor":1500000,"evidencia":"cita"},'
     '"ingresos_mensuales":{"valor":null,"evidencia":null},'
@@ -272,11 +284,24 @@ INSTRUCCIONES_EXTRAER = (
     '"nombre":{"valor":"Juan","evidencia":"cita"},'
     '"apellido_paterno":{"valor":"Pérez","evidencia":"cita"},'
     '"apellido_materno":{"valor":null,"evidencia":null},'
-    '"telefono":{"valor":"987654321","evidencia":"cita"}}'
+    '"telefono":{"valor":"987654321","evidencia":"cita"},'
+    '"producto_ofrecido":{"valor":"Compra de cartera","evidencia":"cita"},'
+    '"monto_oferta":{"valor":5000000,"evidencia":"cita"},'
+    '"plazo_meses":{"valor":36,"evidencia":"cita"},'
+    '"valor_cuota":{"valor":180000,"evidencia":"cita"},'
+    '"tasa":{"valor":1.89,"evidencia":"cita"},'
+    '"cae":{"valor":null,"evidencia":null},'
+    '"respuesta_cliente":{"valor":"Lo pensará","evidencia":"cita"}}'
 )
 
 CAMPOS_EXTRAER = ("monto_solicitado", "ingresos_mensuales", "rut",
-                  "nombre", "apellido_paterno", "apellido_materno", "telefono")
+                  "nombre", "apellido_paterno", "apellido_materno", "telefono",
+                  "producto_ofrecido", "monto_oferta", "plazo_meses", "valor_cuota",
+                  "tasa", "cae", "respuesta_cliente")
+CAMPOS_MONTO = ("monto_solicitado", "ingresos_mensuales", "monto_oferta", "valor_cuota")
+CAMPOS_PORCENTAJE = ("tasa", "cae")
+# campos de lista cerrada: la pagina manda las opciones validas
+CAMPOS_LISTA = {"producto_ofrecido": "productos", "respuesta_cliente": "respuestas"}
 CAMPOS_TEXTO = ("nombre", "apellido_paterno", "apellido_materno")
 _RUT_RE = re.compile(r"^(\d{1,8})-([\dK])$")
 
@@ -335,7 +360,29 @@ def _normalizar_telefono(v):
     return d if 8 <= len(d) <= 12 else None
 
 
-def extraer(texto, campos=None):
+def _normalizar_porcentaje(v):
+    """Numero con hasta dos decimales; acepta "1,89" o "1.89 %"."""
+    if isinstance(v, bool):
+        return None
+    try:
+        n = float(str(v).replace("%", "").replace(",", ".").strip()) if not isinstance(v, (int, float)) else float(v)
+    except ValueError:
+        return None
+    return round(n, 2) if 0 < n < 100 else None
+
+
+def _normalizar_plazo(v):
+    n = _normalizar_monto(v)
+    return n if n and n <= 480 else None
+
+
+def _en_lista(v, opciones):
+    """La opcion permitida que coincide, sin distinguir mayusculas."""
+    t = str(v or "").strip().lower()
+    return next((o for o in opciones if o.lower() == t), None)
+
+
+def extraer(texto, campos=None, listas=None):
     """Datos de la solicitud dichos en la conversacion. No persiste nada.
 
     Sin cita no hay dato: un valor sin evidencia se descarta. El RUT trae
@@ -349,8 +396,12 @@ def extraer(texto, campos=None):
     if not pedidos:
         raise ValueError("No hay campos que extraer.")
 
-    datos, uso, deployment = _chat(INSTRUCCIONES_EXTRAER,
-                                   "TRANSCRIPCIÓN:\n%s" % texto)
+    listas = {k: [str(o).strip() for o in (listas or {}).get(k) or [] if str(o).strip()][:50]
+              for k in set(CAMPOS_LISTA.values())}
+    instrucciones = (INSTRUCCIONES_EXTRAER
+                     .replace("{productos}", " | ".join(listas["productos"]) or "(ninguno)")
+                     .replace("{respuestas}", " | ".join(listas["respuestas"]) or "(ninguna)"))
+    datos, uso, deployment = _chat(instrucciones, "TRANSCRIPCIÓN:\n%s" % texto)
 
     salida = {}
     for campo in pedidos:
@@ -365,6 +416,12 @@ def extraer(texto, campos=None):
             valor = _normalizar_nombre(crudo.get("valor"))
         elif campo == "telefono":
             valor = _normalizar_telefono(crudo.get("valor"))
+        elif campo in CAMPOS_LISTA:
+            valor = _en_lista(crudo.get("valor"), listas[CAMPOS_LISTA[campo]])
+        elif campo in CAMPOS_PORCENTAJE:
+            valor = _normalizar_porcentaje(crudo.get("valor"))
+        elif campo == "plazo_meses":
+            valor = _normalizar_plazo(crudo.get("valor"))
         else:
             valor = _normalizar_monto(crudo.get("valor"))
         if valor is None or not evidencia:
@@ -402,8 +459,14 @@ INSTRUCCIONES_CLASIFICAR = (
     "3. Si se trataron varios temas, prima el que motivó el contacto; un "
     "ofrecimiento hecho por el ejecutivo no es el motivo del cliente.\n"
     "4. No evalúes a las personas.\n\n"
+    "Además redacta \"comentarios\": el registro de la gestión para el sistema, en 2 a 4 "
+    "frases, en tercera persona y en tono de bitácora (por ejemplo: \"Se conversa con el "
+    "socio, se da a conocer la oferta...\"). Incluye el motivo, lo ofrecido y la respuesta "
+    "del cliente. Solo hechos de la conversación; sin RUT, teléfonos ni montos de ingresos; "
+    "sin opiniones sobre las personas.\n\n"
     "Responde SOLO un objeto JSON con esta forma:\n"
-    '{"opcion":3,"evidencia":"cita literal","justificacion":"una frase breve"}'
+    '{"opcion":3,"evidencia":"cita literal","justificacion":"una frase breve",'
+    '"comentarios":"Se conversa con ..."}'
 )
 
 
@@ -442,10 +505,13 @@ def clasificar(texto, opciones):
                      "evidencia": evidencia,
                      "justificacion": str(datos.get("justificacion") or "").strip() or None}
 
+    comentarios = str(datos.get("comentarios") or "").strip()[:2000] or None
+
     logging.info("Clasificacion: %s", "con propuesta" if propuesta else "sin propuesta")
     return {
         "mock": False,
         "propuesta": propuesta,
+        "comentarios": comentarios,
         "modelo": deployment,
         "tokens": uso.get("total_tokens"),
         "aviso": ("Propuesta automática a partir de la conversación. "

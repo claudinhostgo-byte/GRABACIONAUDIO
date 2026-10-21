@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.21-1" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.21-2" />
 </head>
 <body>
 <div class="shell">
@@ -254,10 +254,22 @@
           <ol id="vivoTemas" class="criterios"></ol>
           <div id="vivoMsg" class="msg"></div>
 
-          <p class="hint">Los datos se completan solos cuando el cliente los dice. Revise,
-            corrija si hace falta y confirme con OK: recién ahí pasan al caso.</p>
-          <div id="datosSolicitud" class="datos"></div>
+          <p class="hint">Los datos se completan solos cuando se dicen en la conversación.
+            Revise, corrija si hace falta y confirme con OK: recién ahí pasan al caso.</p>
 
+          <div class="pestanas" role="tablist" aria-label="Datos de la atención">
+            <button type="button" role="tab" class="pestana" data-p="cliente">Cliente<span class="cuenta"></span></button>
+            <button type="button" role="tab" class="pestana" data-p="oferta">Oferta<span class="cuenta"></span></button>
+            <button type="button" role="tab" class="pestana" data-p="cierre">Cierre<span class="cuenta"></span></button>
+          </div>
+
+          <div class="pestana-panel" role="tabpanel" data-p="cliente">
+            <div id="datosCliente" class="datos"></div>
+          </div>
+          <div class="pestana-panel" role="tabpanel" data-p="oferta">
+            <div id="datosOferta" class="datos"></div>
+          </div>
+          <div class="pestana-panel" role="tabpanel" data-p="cierre">
           <h3 class="trh">Clasificación de la atención</h3>
           <div id="clasif" class="clasif">
             <label for="clasifC">Clasificación</label><select id="clasifC"></select>
@@ -269,6 +281,17 @@
             </div>
             <div id="clasifEstado" class="dato-estado"></div>
             <div id="clasifEv" class="crit-evidencia hidden"></div>
+          </div>
+
+          <h3 class="trh">Comentarios de la gestión</h3>
+          <div id="coment" class="clasif coment">
+            <textarea id="comentTxt" rows="4" spellcheck="true"
+              placeholder="Se redactan al terminar la conversación, o con «Proponer»."></textarea>
+            <div class="clasif-acciones">
+              <button id="comentOk" class="primary small" type="button">OK</button>
+            </div>
+            <div id="comentEstado" class="dato-estado"></div>
+          </div>
           </div>
           <p class="conv-nota">Indicio automático sobre el contenido de la conversación.
             No evalúa a la persona ni reemplaza una revisión humana.</p>
@@ -392,6 +415,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.21-1"></script>
+<script src="assets/app.js?v=2026.10.21-2"></script>
 </body>
 </html>

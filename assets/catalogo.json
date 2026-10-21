@@ -1,49 +1,98 @@
 {
-  "nota": "Catalogo de DEMO, no es el catalogo real del cliente. Validar con el negocio antes de usarlo fuera de una demostracion. Es la unica fuente: lo usan la pagina, la clasificacion con IA y infra/dynamics_campos.ps1 para crear las opciones en Dynamics.",
+  "nota": "Catalogo de DEMO, no es el catalogo real del cliente. Validar con el negocio antes de usarlo fuera de una demostracion. Es la unica fuente: lo usan la pagina, la IA y infra/dynamics_campos.ps1 para crear las opciones en Dynamics.",
   "demo": true,
   "clasificaciones": [
     {
       "nombre": "Reclamos",
       "motivos": [
-        { "nombre": "Cuenta Vista",
-          "submotivos": ["Fraude/Desconoce transacción de Cargo/Giro/Compra",
-                         "Cobro de comisión no reconocido",
-                         "Bloqueo de cuenta"] },
-        { "nombre": "Crédito de consumo",
-          "submotivos": ["Cobro indebido de cuota",
-                         "Error en tasa o condiciones"] },
-        { "nombre": "Tarjeta de crédito",
-          "submotivos": ["Compra no reconocida",
-                         "Cargo duplicado"] }
+        {
+          "nombre": "Cuenta Vista",
+          "submotivos": [
+            "Fraude/Desconoce transacción de Cargo/Giro/Compra",
+            "Cobro de comisión no reconocido",
+            "Bloqueo de cuenta"
+          ]
+        },
+        {
+          "nombre": "Crédito de consumo",
+          "submotivos": [
+            "Cobro indebido de cuota",
+            "Error en tasa o condiciones"
+          ]
+        },
+        {
+          "nombre": "Tarjeta de crédito",
+          "submotivos": [
+            "Compra no reconocida",
+            "Cargo duplicado"
+          ]
+        }
       ]
     },
     {
       "nombre": "Solicitudes",
       "motivos": [
-        { "nombre": "Crédito de consumo",
-          "submotivos": ["Solicitud de crédito preaprobado",
-                         "Simulación de crédito",
-                         "Repactación de deuda"] },
-        { "nombre": "Cuenta Vista",
-          "submotivos": ["Apertura de cuenta",
-                         "Actualización de datos de contacto"] },
-        { "nombre": "Beneficios",
-          "submotivos": ["Inscripción en beneficio",
-                         "Información de convenios"] }
+        {
+          "nombre": "Crédito de consumo",
+          "submotivos": [
+            "Solicitud de crédito preaprobado",
+            "Simulación de crédito",
+            "Repactación de deuda",
+            "Compra de cartera"
+          ]
+        },
+        {
+          "nombre": "Cuenta Vista",
+          "submotivos": [
+            "Apertura de cuenta",
+            "Actualización de datos de contacto"
+          ]
+        },
+        {
+          "nombre": "Beneficios",
+          "submotivos": [
+            "Inscripción en beneficio",
+            "Información de convenios"
+          ]
+        }
       ]
     },
     {
       "nombre": "Consultas",
       "motivos": [
-        { "nombre": "Crédito de consumo",
-          "submotivos": ["Estado de solicitud de crédito",
-                         "Saldo de deuda"] },
-        { "nombre": "Cuenta Vista",
-          "submotivos": ["Saldo y movimientos"] },
-        { "nombre": "Beneficios",
-          "submotivos": ["Coopeuch Educa",
-                         "Beneficios de salud"] }
+        {
+          "nombre": "Crédito de consumo",
+          "submotivos": [
+            "Estado de solicitud de crédito",
+            "Saldo de deuda"
+          ]
+        },
+        {
+          "nombre": "Cuenta Vista",
+          "submotivos": [
+            "Saldo y movimientos"
+          ]
+        },
+        {
+          "nombre": "Beneficios",
+          "submotivos": [
+            "Coopeuch Educa",
+            "Beneficios de salud"
+          ]
+        }
       ]
     }
+  ],
+  "productos": [
+    "Compra de cartera",
+    "Crédito de consumo",
+    "Refinanciamiento",
+    "Tarjeta de crédito"
+  ],
+  "respuestas": [
+    "Acepta la oferta",
+    "Lo pensará",
+    "Rechaza la oferta",
+    "Pide nuevo contacto"
   ]
 }

@@ -537,7 +537,7 @@ body.modo-vivo .dato-estado{font-size:11px}
 body.modo-vivo .dato .crit-evidencia{-webkit-line-clamp:1}
 
 /* pantallas angostas: la barra se reparte en dos filas */
-@media (max-width: 900px){
+@media (max-width: 720px){
   body.modo-vivo #simple{grid-template-columns:auto 1fr;
     grid-template-rows:none;min-height:0;
     grid-template-areas:"hd hd" "ctrls rec" "mic num" "err err" "vivo vivo" "previa previa" "out out"}
@@ -587,4 +587,38 @@ body.modo-vivo #vivo .col-panel > .trh:first-child{margin-top:0}
    por dentro en vez de estirar la pagina */
 body.modo-vivo #vivo{height:calc(100vh - 70px)}
 body.embed.modo-vivo #vivo{height:calc(100vh - 62px)}
-@media (max-width: 900px){ body.modo-vivo #vivo, body.embed.modo-vivo #vivo{height:auto} }
+@media (max-width: 720px){ body.modo-vivo #vivo, body.embed.modo-vivo #vivo{height:auto} }
+
+/* ---------- pestanas del panel en vivo: Cliente / Oferta / Cierre ---------- */
+.pestanas{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:8px 0 6px}
+.pestana{flex:1;height:30px;padding:0 8px;background:none;border:0;border-bottom:2px solid transparent;
+  border-radius:0;color:var(--ink2);font-size:12.5px;font-weight:600;display:flex;
+  align-items:center;justify-content:center;gap:6px}
+.pestana:hover{background:var(--hover);color:var(--ink)}
+.pestana.activa{color:var(--brand);border-bottom-color:var(--brand)}
+.pestana .cuenta{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#b37800;
+  color:#fff;font-size:10.5px;line-height:16px;font-weight:700}
+.pestana .cuenta:empty{display:none}
+.pestana-panel.hidden{display:none}
+.coment{grid-template-columns:1fr}
+.coment textarea{font:inherit;font-size:12.5px;line-height:1.45;color:var(--ink);background:var(--card);
+  border:1px solid var(--line-str);border-radius:var(--r);padding:6px 8px;resize:vertical;min-height:84px;width:100%}
+.coment textarea[readonly]{background:var(--hover);border-color:var(--line)}
+.dato select{height:26px;padding:2px 6px;font-size:12.5px;flex:1;min-width:0}
+
+/* grabador al 64 % del formulario (notebook de 1366 px: ~740 px de ancho):
+   barra en dos filas y panel mas angosto, sin pasar todavia al apilado */
+@media (min-width: 721px) and (max-width: 1100px){
+  body.modo-vivo #simple{grid-template-columns:auto 1fr auto;
+    grid-template-areas:"ctrls rec hd" "mic mic num" "err err err" "vivo vivo vivo" "previa previa previa" "out out out"}
+  body.modo-vivo .pers-mic, body.modo-vivo .pers-num{margin-top:6px}
+  body.modo-vivo #vivo .col-panel{flex:0 0 330px}
+  body.modo-vivo #vivo{height:calc(100vh - 126px)}
+  body.embed.modo-vivo #vivo{height:calc(100vh - 118px)}
+}
+/* en vivo las dos columnas se mantienen hasta 720 px (el corte general de
+   .columnas es 860 px, pensado para la transcripcion final) */
+@media (min-width: 721px) and (max-width: 860px){
+  body.modo-vivo #vivo .columnas{flex-direction:row}
+  body.modo-vivo #vivo .col-panel{width:auto}
+}

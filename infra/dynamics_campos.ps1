@@ -72,6 +72,27 @@ function CampoMoneda([string]$schema, [string]$nombre, [string]$desc) {
        "MinValue" = 0; "MaxValue" = 100000000000 }
 }
 
+function CampoEntero([string]$schema, [string]$nombre, [string]$desc, [int]$min, [int]$max) {
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.IntegerAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "Format" = "None"; "MinValue" = $min; "MaxValue" = $max }
+}
+
+function CampoDecimal([string]$schema, [string]$nombre, [string]$desc) {
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.DecimalAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "Precision" = 2; "MinValue" = 0; "MaxValue" = 100 }
+}
+
+function CampoMemo([string]$schema, [string]$nombre, [string]$desc, [int]$largo) {
+    @{ "@odata.type" = "Microsoft.Dynamics.CRM.MemoAttributeMetadata"
+       "SchemaName" = "${Prefijo}_$schema"; "DisplayName" = Etiqueta $nombre
+       "Description" = Etiqueta $desc; "RequiredLevel" = $nivel
+       "MaxLength" = $largo; "Format" = "TextArea" }
+}
+
 function CampoLista([string]$schema, [string]$nombre, [string]$desc, [string[]]$opciones) {
     $i = 0
     $ops = @($opciones | ForEach-Object {
@@ -88,6 +109,8 @@ $cat = Get-Content -Raw -Encoding UTF8 $Catalogo | ConvertFrom-Json
 $clasificaciones = @($cat.clasificaciones | ForEach-Object { $_.nombre }) | Select-Object -Unique
 $motivos         = @($cat.clasificaciones | ForEach-Object { $_.motivos } | ForEach-Object { $_.nombre }) | Select-Object -Unique
 $submotivos      = @($cat.clasificaciones | ForEach-Object { $_.motivos } | ForEach-Object { $_.submotivos }) | Select-Object -Unique
+$productos       = @($cat.productos)
+$respuestas      = @($cat.respuestas)
 $demo = if ($cat.demo) { " [catálogo de demo]" } else { "" }
 
 $origen = "confirmado desde la grabación en vivo."
@@ -101,7 +124,15 @@ $campos = @(
     (CampoTexto  "Telefono"          "Teléfono"           "Teléfono de contacto del socio, $origen" 20 "Phone"),
     (CampoLista  "Clasificacion"     "Clasificación"      "Clasificación de la atención, $origen$demo" $clasificaciones),
     (CampoLista  "Motivo"            "Motivo"             "Motivo de la atención, $origen$demo" $motivos),
-    (CampoLista  "Submotivo"         "Submotivo"          "Submotivo de la atención, $origen$demo" $submotivos)
+    (CampoLista  "Submotivo"         "Submotivo"          "Submotivo de la atención, $origen$demo" $submotivos),
+    (CampoLista  "ProductoOfrecido"  "Producto ofrecido"  "Producto de la oferta comercial, $origen$demo" $productos),
+    (CampoMoneda "MontoOferta"       "Monto oferta"       "Monto ofrecido al cliente, $origen"),
+    (CampoEntero "PlazoMeses"        "Plazo (meses)"      "Plazo de la oferta en meses, $origen" 1 480),
+    (CampoMoneda "ValorCuota"        "Valor cuota"        "Valor de la cuota mensual ofrecida, $origen"),
+    (CampoDecimal "TasaMensual"      "Tasa mensual (%)"   "Tasa de interés mensual ofrecida, $origen"),
+    (CampoDecimal "Cae"              "CAE (%)"            "Carga anual equivalente de la oferta, $origen"),
+    (CampoLista  "RespuestaCliente"  "Respuesta del cliente" "Respuesta del cliente a la oferta, $origen$demo" $respuestas),
+    (CampoMemo   "ComentariosGestion" "Comentarios de la gestión" "Registro de la gestión redactado a partir de la conversación y confirmado por el ejecutivo." 4000)
 )
 
 $base = "$api/EntityDefinitions(LogicalName='incident')/Attributes"

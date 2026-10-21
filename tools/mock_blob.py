@@ -183,6 +183,25 @@ class Handler(BaseHTTPRequestHandler):
                             if len(partes) > i else None)
         v, cita = ultimo(("telefono", "teléfono", "celular"), r"9[\d ]{8,12}")
         datos["telefono"] = ({"valor": re.sub(r"\D", "", v), "evidencia": cita} if v else None)
+        # oferta: palabras clave en la frase del ejecutivo
+        listas = req.get("listas") or {}
+        for campo, lista in (("producto_ofrecido", "productos"), ("respuesta_cliente", "respuestas")):
+            cita = next((f for f in reversed(frases)
+                         for o in listas.get(lista) or [] if o.lower().split()[0] in f.lower()), None)
+            op = next((o for o in listas.get(lista) or [] if cita and o.lower().split()[0] in cita.lower()), None)
+            datos[campo] = {"valor": op, "evidencia": cita} if op else None
+        for campo, claves, patron in (("monto_oferta", ("ofrec",), r"\$\s?\d[\d.]{3,}"),
+                                      ("valor_cuota", ("cuota",), r"\$\s?\d[\d.]{3,}"),
+                                      ("plazo_meses", ("meses",), r"\d{1,3}(?= meses)"),
+                                      ("tasa", ("tasa",), r"\d+,\d+(?= ?%)"),
+                                      ("cae", ("cae",), r"\d+,\d+(?= ?%)")):
+            v, cita = ultimo(claves, patron)
+            if v and campo in ("tasa", "cae"):
+                datos[campo] = {"valor": float(v.replace(",", ".")), "evidencia": cita}
+            elif v:
+                datos[campo] = {"valor": int(re.sub(r"\D", "", v)), "evidencia": cita}
+            else:
+                datos[campo] = None
         v, cita = ultimo(("rut",), r"\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]")
         if v:
             t = re.sub(r"[^\dkK]", "", v).upper()
@@ -209,7 +228,10 @@ class Handler(BaseHTTPRequestHandler):
                              "evidencia": "(cita simulada)", "justificacion": "Resultado simulado."}
                 break
         print("  POST /clasificar  %s" % ("con propuesta" if propuesta else "sin propuesta"), flush=True)
-        return self._responder({"mock": True, "propuesta": propuesta, "modelo": "simulador"})
+        comentarios = ("[Simulado] Se conversa con el socio, se da a conocer la oferta de campaña "
+                       "y se registra su respuesta.")
+        return self._responder({"mock": True, "propuesta": propuesta, "comentarios": comentarios,
+                                "modelo": "simulador"})
 
     def _responder(self, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()

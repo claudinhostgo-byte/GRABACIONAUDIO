@@ -140,7 +140,7 @@ def api_evaluar():
 def api_extraer():
     body = request.get_json(silent=True) or {}
     try:
-        return jsonify(evaluacion.extraer(body.get("texto"), body.get("campos")))
+        return jsonify(evaluacion.extraer(body.get("texto"), body.get("campos"), body.get("listas")))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except evaluacion.EvalConfigError as e:

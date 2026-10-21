@@ -29,7 +29,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return _json({"error": "Se esperaba un cuerpo JSON."}, 400)
 
     try:
-        return _json(evaluacion.extraer(body.get("texto"), body.get("campos")))
+        return _json(evaluacion.extraer(body.get("texto"), body.get("campos"), body.get("listas")))
     except ValueError as e:
         return _json({"error": str(e)}, 400)
     except evaluacion.EvalConfigError as e:

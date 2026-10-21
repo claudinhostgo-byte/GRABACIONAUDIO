@@ -107,16 +107,25 @@ simplificada (sube, transcribe por hablante y deja la revisión del guion dispon
 Azure AI Speech (`SPEECH_KEY`, `SPEECH_REGION`) y Azure OpenAI (`AOAI_*`), los mismos que ya
 usan la transcripción y la revisión del guion.
 
-#### Datos del socio, de la solicitud y clasificación (pestaña en vivo)
+#### Datos del cliente, oferta comercial y cierre (pestaña en vivo)
 
-Bajo los temas, la pestaña en vivo muestra los datos que el ejecutivo pide en la conversación.
+La demo tiene dos partes. La **captura de datos del cliente** (lo que el ejecutivo le pide) y la
+**oferta comercial** (lo que el ejecutivo presenta y cómo responde el cliente), modelada sobre la
+Oportunidad de campaña del cliente. El panel del grabador las ordena en tres pestañas,
+**Cliente · Oferta · Cierre**, cada una con un contador de lo que espera confirmación.
+
+En Dynamics la pestaña "Grabación en vivo" tiene dos columnas: el grabador a la izquierda (64 %) y
+los campos a la derecha (36 %), en las secciones Datos del cliente, Oferta comercial y Cierre de la
+atención. Así se ve cómo se pegan los datos mientras transcurre la conversación.
+
+Bajo los temas, la pestaña en vivo muestra los datos que se dicen en la conversación.
 Se completan solos cuando el cliente los dice: el RUT al instante si se reconoce con su dígito
 verificador válido, y todos mediante Azure OpenAI, siempre con la frase que los respalda.
 La persona revisa, corrige si hace falta y confirma con **OK**; solo entonces el dato pasa al
 caso. Un campo corregido a mano no se vuelve a sobrescribir.
 
-Al **detener** la grabación (o con **Proponer** durante ella) se propone la clasificación de la
-atención: una combinación Clasificación › Motivo › Submotivo del catálogo
+Al **detener** la grabación (o con **Proponer** durante ella) se proponen los **comentarios de la
+gestión** (bitácora de 2 a 4 frases, editable) y la clasificación de la atención: una combinación Clasificación › Motivo › Submotivo del catálogo
 `assets/catalogo.json`, con la cita que la respalda. Los selectores van en cascada; al dar OK
 se escriben los tres campos. El catálogo actual es **de demo**, no el del cliente.
 
@@ -133,6 +142,14 @@ opciones busca la opción por su etiqueta, sin distinguir tildes ni mayúsculas.
 | Teléfono | `wit_telefono` | Teléfono (20), formato `+56 9 1234 5678` |
 | Monto solicitado | `wit_montosolicitado` | Moneda |
 | Ingresos mensuales | `wit_ingresosmensuales` | Moneda |
+| Producto ofrecido | `wit_productoofrecido` | Opciones, del catálogo (`productos`) |
+| Monto oferta | `wit_montooferta` | Moneda |
+| Plazo (meses) | `wit_plazomeses` | Número entero |
+| Valor cuota | `wit_valorcuota` | Moneda |
+| Tasa mensual (%) | `wit_tasamensual` | Decimal (2) |
+| CAE (%) | `wit_cae` | Decimal (2) |
+| Respuesta del cliente | `wit_respuestacliente` | Opciones, del catálogo (`respuestas`) |
+| Comentarios de la gestión | `wit_comentariosgestion` | Texto largo (4000) |
 | Clasificación | `wit_clasificacion` | Opciones, del catálogo |
 | Motivo | `wit_motivo` | Opciones, del catálogo |
 | Submotivo | `wit_submotivo` | Opciones, del catálogo |

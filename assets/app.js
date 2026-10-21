@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-1';
+const VERSION = '2026.10.21-2';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -734,7 +734,10 @@ function vivoReiniciar(){
   DATOS_SOLICITUD.forEach((c) => { V.datos[c.id] = datoVacio(); });
   pintarDatos();
   V.clasif = clasifVacia();
+  V.coment = comentVacio();
   pintarSelectClasif();
+  pintarComent();
+  mostrarPestana('cliente');
   $('vivoCol').classList.remove('hidden');
   $('vivoAviso').classList.add('hidden');
   setMsg($('vivoMsg'), '');
@@ -907,7 +910,8 @@ async function revisarDatos(texto, gen){
   const pendientes = datosPendientes();
   if (!S.cfg.extraerUrl || !pendientes.length) return;
   const d = await postJson(S.cfg.extraerUrl, {
-    texto, recordId: S.id, campos: pendientes.map((c) => c.clave)
+    texto, recordId: S.id, campos: pendientes.map((c) => c.clave),
+    listas: { productos: opcionesDe({ lista: 'productos' }), respuestas: opcionesDe({ lista: 'respuestas' }) }
   });
   if (gen !== V.gen) return;
   V.simulado = V.simulado || !!d.mock;
@@ -923,15 +927,55 @@ async function revisarDatos(texto, gen){
    El ejecutivo los pide en la conversacion; aqui se proponen solos y la
    persona los confirma o corrige. Solo lo confirmado pasa al caso de
    Dynamics. Un campo corregido a mano no se vuelve a sobrescribir. */
+/* `pestana` decide donde se muestra; `lista` nombra las opciones del catalogo
+   (assets/catalogo.json) para los campos de lista cerrada. */
 const DATOS_SOLICITUD = [
-  { id: 'nombre',   clave: 'nombre',             titulo: 'Nombre',             tipo: 'texto', grupo: 'Datos del socio' },
-  { id: 'paterno',  clave: 'apellido_paterno',   titulo: 'Apellido paterno',   tipo: 'texto', grupo: 'Datos del socio' },
-  { id: 'materno',  clave: 'apellido_materno',   titulo: 'Apellido materno',   tipo: 'texto', grupo: 'Datos del socio' },
-  { id: 'rut',      clave: 'rut',                titulo: 'RUT',                tipo: 'rut',   grupo: 'Datos del socio' },
-  { id: 'telefono', clave: 'telefono',           titulo: 'Teléfono',           tipo: 'telefono', grupo: 'Datos del socio' },
-  { id: 'monto',    clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto', grupo: 'Datos de la solicitud' },
-  { id: 'ingresos', clave: 'ingresos_mensuales', titulo: 'Ingresos mensuales', tipo: 'monto', grupo: 'Datos de la solicitud' }
+  { id: 'nombre',    clave: 'nombre',             titulo: 'Nombre',             tipo: 'texto',    pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'paterno',   clave: 'apellido_paterno',   titulo: 'Apellido paterno',   tipo: 'texto',    pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'materno',   clave: 'apellido_materno',   titulo: 'Apellido materno',   tipo: 'texto',    pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'rut',       clave: 'rut',                titulo: 'RUT',                tipo: 'rut',      pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'telefono',  clave: 'telefono',           titulo: 'Teléfono',           tipo: 'telefono', pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'ingresos',  clave: 'ingresos_mensuales', titulo: 'Ingresos mensuales', tipo: 'monto',    pestana: 'cliente', grupo: 'Datos del socio' },
+  { id: 'monto',     clave: 'monto_solicitado',   titulo: 'Monto solicitado',   tipo: 'monto',    pestana: 'oferta',  grupo: 'Lo que pide el cliente' },
+  { id: 'producto',  clave: 'producto_ofrecido',  titulo: 'Producto ofrecido',  tipo: 'lista', lista: 'productos', pestana: 'oferta', grupo: 'Oferta presentada' },
+  { id: 'montooferta', clave: 'monto_oferta',     titulo: 'Monto oferta',       tipo: 'monto',    pestana: 'oferta',  grupo: 'Oferta presentada' },
+  { id: 'plazo',     clave: 'plazo_meses',        titulo: 'Plazo (meses)',      tipo: 'entero',   pestana: 'oferta',  grupo: 'Oferta presentada' },
+  { id: 'valorcuota', clave: 'valor_cuota',       titulo: 'Valor cuota',        tipo: 'monto',    pestana: 'oferta',  grupo: 'Oferta presentada' },
+  { id: 'tasa',      clave: 'tasa',               titulo: 'Tasa mensual',       tipo: 'porcentaje', pestana: 'oferta', grupo: 'Oferta presentada' },
+  { id: 'cae',       clave: 'cae',                titulo: 'CAE',                tipo: 'porcentaje', pestana: 'oferta', grupo: 'Oferta presentada' },
+  { id: 'respuesta', clave: 'respuesta_cliente',  titulo: 'Respuesta del cliente', tipo: 'lista', lista: 'respuestas', pestana: 'oferta', grupo: 'Respuesta del cliente' }
 ];
+
+const opcionesDe = (c) => (CATALOGO && CATALOGO[c.lista]) || [];
+
+/* ---------- pestanas del panel ---------- */
+
+function mostrarPestana(p){
+  document.querySelectorAll('.pestana').forEach((b) => {
+    const activa = b.dataset.p === p;
+    b.classList.toggle('activa', activa);
+    b.setAttribute('aria-selected', activa ? 'true' : 'false');
+  });
+  document.querySelectorAll('.pestana-panel').forEach((x) => x.classList.toggle('hidden', x.dataset.p !== p));
+}
+
+/** Cuantos datos esperan confirmacion en cada pestana. */
+function actualizarContadores(){
+  const cuenta = { cliente: 0, oferta: 0, cierre: 0 };
+  DATOS_SOLICITUD.forEach((c) => {
+    const d = V.datos[c.id];
+    if (d && (d.estado === 'detectado' || d.estado === 'editado')) cuenta[c.pestana]++;
+  });
+  [V.clasif, V.coment].forEach((k) => {
+    if (k && (k.estado === 'propuesto' || k.estado === 'editado')) cuenta.cierre++;
+  });
+  document.querySelectorAll('.pestana').forEach((b) => {
+    const n = cuenta[b.dataset.p];
+    const sp = b.querySelector('.cuenta');
+    sp.textContent = n ? String(n) : '';
+    sp.title = n ? n + ' por confirmar' : '';
+  });
+}
 const DATO_TRASPASO_MS = 15000;     // espera maxima de la respuesta de Dynamics
 
 /* estado: vacio -> detectado -> (editado) -> confirmado
@@ -977,7 +1021,9 @@ function formatoDato(tipo, valor){
     return p ? Number(p.cuerpo).toLocaleString('es-CL') + '-' + p.dv : String(valor);
   }
   if (tipo === 'telefono') return formatoTelefono(valor);
-  if (tipo === 'texto') return String(valor).trim();
+  if (tipo === 'texto' || tipo === 'lista') return String(valor).trim();
+  if (tipo === 'entero') return String(Math.round(Number(valor)));
+  if (tipo === 'porcentaje') return Number(valor).toLocaleString('es-CL', { maximumFractionDigits: 2 }) + ' %';
   return '$' + Number(valor).toLocaleString('es-CL');
 }
 
@@ -994,6 +1040,23 @@ function leerDato(c, texto){
     if (/\d/.test(t)) return { error: 'No debería llevar números.' };
     return { valor: t };
   }
+  if (c.tipo === 'lista'){
+    if (opcionesDe(c).indexOf(texto) === -1) return { error: 'Elija una opción.' };
+    return { valor: texto };
+  }
+  if (c.tipo === 'entero'){
+    const n = Number(String(texto || '').replace(/[^0-9]/g, ''));
+    if (!n || n > 480) return { error: 'Escriba el plazo en meses.' };
+    return { valor: n };
+  }
+  if (c.tipo === 'porcentaje'){
+    // con coma, el punto es de miles ("1.234,5"); sin coma, el punto es el decimal
+    let t = String(texto || '').replace('%', '').trim();
+    t = t.indexOf(',') !== -1 ? t.replace(/\./g, '').replace(',', '.') : t;
+    const n = Number(t);
+    if (!(n > 0 && n < 100)) return { error: 'Escriba un porcentaje, por ejemplo 1,49.' };
+    return { valor: Math.round(n * 100) / 100 };
+  }
   if (c.tipo === 'telefono'){
     const d = String(texto || '').replace(/\D/g, '');
     if (d.length < 8 || d.length > 12) return { error: 'Escriba el teléfono con todos sus dígitos.' };
@@ -1009,7 +1072,8 @@ function proponerDato(id, valor, evidencia){
   const d = V.datos[id];
   if (!d || (d.estado !== 'vacio' && d.estado !== 'detectado')) return;
   const c = DATOS_SOLICITUD.find((x) => x.id === id);
-  const nuevo = c.tipo === 'monto' ? Number(valor) : formatoDato(c.tipo, valor);
+  const numerico = c.tipo === 'monto' || c.tipo === 'entero' || c.tipo === 'porcentaje';
+  const nuevo = numerico ? Number(valor) : formatoDato(c.tipo, valor);
   if (d.estado === 'detectado' && String(d.valor) === String(nuevo)) return;
   V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado' });
   pintarDato(c, true);
@@ -1026,11 +1090,12 @@ function rutPorPatron(texto){
 
 /** Arma los campos una sola vez; despues se actualizan sin perder el foco. */
 function pintarDatos(){
-  const cont = $('datosSolicitud');
-  if (!cont) return;
-  cont.innerHTML = '';
+  const conts = { cliente: $('datosCliente'), oferta: $('datosOferta') };
+  if (!conts.cliente) return;
+  Object.values(conts).forEach((x) => { x.innerHTML = ''; });
   let grupo = null;
   DATOS_SOLICITUD.forEach((c) => {
+    const cont = conts[c.pestana];
     if (c.grupo !== grupo){
       grupo = c.grupo;
       const h = document.createElement('h3');
@@ -1049,14 +1114,21 @@ function pintarDatos(){
 
     const fila = document.createElement('div');
     fila.className = 'dato-fila';
-    const inp = document.createElement('input');
+    let inp;
+    if (c.tipo === 'lista'){
+      inp = document.createElement('select');
+      llenarSelect(inp, opcionesDe(c), '');
+    } else {
+      inp = document.createElement('input');
+      inp.type = 'text';
+      inp.autocomplete = 'off';
+      inp.spellcheck = false;
+      inp.inputMode = { monto: 'numeric', entero: 'numeric', porcentaje: 'decimal', telefono: 'tel' }[c.tipo] || 'text';
+      inp.placeholder = { rut: '12.345.678-5', monto: '$0', telefono: '+56 9 1234 5678',
+                          entero: '36', porcentaje: '1,49 %' }[c.tipo] || '';
+    }
     inp.id = 'datoIn_' + c.id;
-    inp.type = 'text';
-    inp.autocomplete = 'off';
-    inp.spellcheck = false;
-    inp.inputMode = c.tipo === 'monto' ? 'numeric' : c.tipo === 'telefono' ? 'tel' : 'text';
-    inp.placeholder = { rut: '12.345.678-5', monto: '$0', telefono: '+56 9 1234 5678' }[c.tipo] || '';
-    inp.addEventListener('input', () => {
+    inp.addEventListener(c.tipo === 'lista' ? 'change' : 'input', () => {
       const d = V.datos[c.id];
       if (d.estado === 'confirmado') return;
       d.estado = 'editado'; d.error = ''; d.corregido = true;
@@ -1097,10 +1169,11 @@ function pintarDato(c, recien, soloEstado){
   const est = $('datoEst_' + c.id), ev = $('datoEv_' + c.id);
 
   if (!soloEstado){
-    inp.value = c.tipo === 'monto' ? formatoDato('monto', d.valor) : (d.valor || '');
+    inp.value = (c.tipo === 'monto' || c.tipo === 'porcentaje') ? formatoDato(c.tipo, d.valor)
+              : (d.valor == null ? '' : String(d.valor));
   }
   const confirmado = d.estado === 'confirmado';
-  inp.readOnly = confirmado;
+  if (c.tipo === 'lista') inp.disabled = confirmado; else inp.readOnly = confirmado;
   btn.textContent = confirmado ? 'Editar' : 'OK';
   btn.className = confirmado ? 'ghost small' : 'primary small';
 
@@ -1134,6 +1207,7 @@ function pintarDato(c, recien, soloEstado){
   ev.title = d.evidencia || '';
   // la cita importa mientras el dato espera revision; despues queda al pasar el mouse
   ev.classList.toggle('hidden', !d.evidencia || confirmado);
+  actualizarContadores();
   box.title = d.evidencia ? 'Dicho en la conversación: «' + d.evidencia + '»' : '';
 }
 
@@ -1219,6 +1293,7 @@ async function cargarCatalogo(){
     const r = await fetch('assets/catalogo.json?v=' + VERSION);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     CATALOGO = await r.json();
+    pintarDatos();
   } catch (e){
     CATALOGO = { clasificaciones: [] };
     setMsg($('clasifEstado'), 'No se pudo cargar el catálogo de clasificación (' + e.message + ').', 'bad');
@@ -1284,15 +1359,64 @@ function pintarClasif(){
   $('clasifEv').textContent = k.evidencia ? '«' + k.evidencia + '»' : '';
   $('clasifEv').title = k.evidencia || '';
   $('clasifEv').classList.toggle('hidden', !k.evidencia || k.estado === 'editado');
+  actualizarContadores();
 }
 
 const clasifVacia = () => ({ estado: 'vacio', clasificacion: '', motivo: '', submotivo: '',
                              evidencia: null, traspaso: null, error: '', pidiendo: false });
+const comentVacio = () => ({ estado: 'vacio', texto: '', traspaso: null, error: '' });
+
+function pintarComent(){
+  const k = V.coment;
+  if (!k) return;
+  const confirmado = k.estado === 'confirmado';
+  const ta = $('comentTxt');
+  if (document.activeElement !== ta) ta.value = k.texto || '';
+  ta.readOnly = confirmado;
+  $('comentOk').textContent = confirmado ? 'Editar' : 'OK';
+  $('comentOk').className = confirmado ? 'ghost small' : 'primary small';
+  $('coment').className = 'clasif coment' + (k.estado === 'propuesto' ? ' detectado' : '') +
+                          (confirmado ? ' confirmado' : '');
+  let texto = '', clase = '';
+  if (k.error && !confirmado){ texto = k.error; clase = 'bad'; }
+  else if (k.estado === 'propuesto') texto = 'Redactado automáticamente: revise y confirme con OK.';
+  else if (confirmado){
+    texto = { enviando: 'Traspasando al caso…', ok: '✓ En el caso',
+              error: 'No llegó al caso: ' + (k.error || 'sin respuesta') + '. Use Editar y OK para reintentar.',
+              'sin-dynamics': 'Confirmado. Para traspasarlo al caso, use esta pantalla desde Dynamics.'
+            }[k.traspaso] || 'Confirmado.';
+    clase = k.traspaso === 'ok' ? 'ok' : k.traspaso === 'error' ? 'bad' : '';
+  }
+  $('comentEstado').textContent = texto;
+  $('comentEstado').className = 'dato-estado' + (clase ? ' ' + clase : '');
+  actualizarContadores();
+}
+
+async function confirmarComent(){
+  const k = V.coment;
+  if (k.estado === 'confirmado'){
+    k.estado = 'editado'; k.traspaso = null; k.error = '';
+    pintarComent();
+    return;
+  }
+  const texto = $('comentTxt').value.trim();
+  if (!texto){ k.error = 'Escriba los comentarios de la gestión.'; pintarComent(); return; }
+  k.texto = texto; k.estado = 'confirmado'; k.traspaso = 'enviando'; k.error = '';
+  pintarComent();
+  const r = await enviarACaso('comentarios', texto);
+  if (V.coment !== k || k.estado !== 'confirmado' || k.texto !== texto) return;
+  k.traspaso = r.sinDynamics ? 'sin-dynamics' : r.ok ? 'ok' : 'error';
+  k.error = r.ok || r.sinDynamics ? '' : (r.error || 'error desconocido');
+  pintarComent();
+}
 
 /** Pide la propuesta con TODA la conversacion: el motivo suele decirse al principio. */
 async function vivoClasificar(){
   const k = V.clasif;
-  if (!k || k.estado === 'confirmado' || k.estado === 'editado' || k.pidiendo) return;
+  if (!k || k.pidiendo) return;
+  const quiereClasif = k.estado !== 'confirmado' && k.estado !== 'editado';
+  const quiereComent = V.coment && (V.coment.estado === 'vacio' || V.coment.estado === 'propuesto');
+  if (!quiereClasif && !quiereComent) return;
   const texto = V.frases.map((f) => f.texto).join(' ');
   if (!texto.trim()){ k.error = 'Todavía no hay conversación que clasificar.'; pintarClasif(); return; }
   if (!S.cfg.clasificarUrl){ k.error = 'Falta el endpoint de clasificación.'; pintarClasif(); return; }
@@ -1303,6 +1427,11 @@ async function vivoClasificar(){
     const d = await postJson(S.cfg.clasificarUrl, { texto, recordId: S.id, opciones: opcionesCatalogo() });
     if (gen !== V.gen || V.clasif !== k) return;
     k.pidiendo = false;
+    const c = V.coment;
+    if (d.comentarios && c && (c.estado === 'vacio' || c.estado === 'propuesto')){
+      Object.assign(c, { texto: d.comentarios + (d.mock ? ' (simulado)' : ''), estado: 'propuesto', error: '' });
+      pintarComent();
+    }
     // si la persona eligio a mano mientras tanto, manda lo suyo
     if (k.estado === 'editado' || k.estado === 'confirmado'){ pintarClasif(); return; }
     if (!d.propuesta){
@@ -1486,6 +1615,10 @@ const GUION_SIMULADO = [
   'Mi sueldo es de $850.000 al mes.',
   '¿A qué teléfono lo podemos contactar?',
   'Mi celular es 9 8765 4321.',
+  'Le cuento que tenemos una campaña de compra de cartera para usted.',
+  'Le podemos ofrecer $5.000.000 a 36 meses.',
+  'La cuota quedaría en $185.000, con una tasa de 1,49 % mensual y un CAE de 19,8 %.',
+  'Me parece bien, lo voy a pensar y le confirmo mañana.',
   'Perfecto, muchas gracias.'
 ];
 
@@ -1527,7 +1660,7 @@ function vivoDetener(){
   pintarVivoTexto();
   // la ultima frase llega como reconocida poco despues de detener
   const gen = V.gen;
-  setTimeout(() => { if (gen === V.gen) vivoClasificar(); }, 1500);
+  setTimeout(() => { if (gen === V.gen){ mostrarPestana('cierre'); vivoClasificar(); } }, 1500);
 }
 
 /* ---------- Clip de evidencia ---------- */
@@ -2957,6 +3090,14 @@ function init(){
     $('clasifS').onchange = () => alCambiarClasif('S');
     $('clasifProponer').onclick = vivoClasificar;
     $('clasifOk').onclick = confirmarClasif;
+    $('comentOk').onclick = confirmarComent;
+    $('comentTxt').addEventListener('input', () => {
+      const k = V.coment;
+      if (!k || k.estado === 'confirmado') return;
+      k.texto = $('comentTxt').value; k.estado = 'editado'; k.error = '';
+      pintarComent();
+    });
+    document.querySelectorAll('.pestana').forEach((b) => { b.onclick = () => mostrarPestana(b.dataset.p); });
     document.body.classList.add('modo-vivo');
     document.title = 'Grabación en vivo';
     vivoReiniciar();
