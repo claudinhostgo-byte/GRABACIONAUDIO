@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.22-2';
+const VERSION = '2026.10.22-3';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -740,6 +740,7 @@ function vivoReiniciar(){
   V.gen++;
   V.frases = []; V.parcial = ''; V.ultima = 0; V.revisadoHasta = 0;
   V.pendiente = false; V.enCurso = false; V.conectado = false; V.simulado = false;
+  V.ventanaRut = 0;
   clearTimeout(V.timer);
   V.temas = TEMAS_VIVO.map(() => ({ cumple: 'pend', evidencia: null }));
   DATOS_SOLICITUD.forEach((c) => { V.datos[c.id] = datoVacio(); });
@@ -891,6 +892,7 @@ function vivoFrase(texto){
   pintarVivoTexto();
   marcarPorClave(texto, false);
   rutPorPatron(texto);
+  rutPorContexto(texto);
   vivoProgramar();
 }
 
@@ -1338,6 +1340,39 @@ function rutPorPatron(texto){
     (x[0] !== '9' && Number(partesRut(x).cuerpo) < 50000000);
   const valido = (m || []).reverse().find((x) => rutValido(x) && plausible(x));
   if (valido) proponerDato('rut', valido, texto);
+}
+
+/* RUT por contexto. Azure Speech casi nunca escribe "RUT": sale "root", "ruth",
+   "rud", "surat", "mirate". En una atencion financiera, si se pide el RUT y se
+   responde con un numero, ese numero es el RUT, aunque no se diga "guion": el
+   ultimo digito (o K) es el verificador. Se mira la frase que lo pide y las dos
+   siguientes. Si el verificador no calza, igual se propone y la ficha avisa.
+   No se toma un numero con forma de celular ni uno pegado o mal cortado. */
+const PIDE_RUT = /(^|[^a-záéíóúñ])(rut|ruts|root|ruth|rud|run|rot|surat|surac|m[ií]rate|carnet|c[eé]dula)(?![a-záéíóúñ])/i;
+const FRASES_TRAS_PEDIR_RUT = 2;
+
+function rutPorContexto(texto){
+  const t = normalizarDictadoRut(texto);
+  const m = t.match(PIDE_RUT);
+  let tramo = null;
+  if (m){
+    V.ventanaRut = FRASES_TRAS_PEDIR_RUT;
+    tramo = t.slice(m.index + m[0].length);        // lo que viene despues de pedirlo
+  } else if (V.ventanaRut > 0){
+    V.ventanaRut--;
+    tramo = t;
+  }
+  if (!tramo) return;
+  // primer tramo numerico: digitos con puntos, espacios o guion, terminado en digito o K
+  const n = tramo.match(/\d[\d.\s-]*[\dkK]\b/);
+  if (!n) return;
+  const crudo = n[0];
+  const limpio = crudo.replace(/[^\dkK]/g, '').toUpperCase();
+  if (limpio.length < 8 || limpio.length > 9) return;     // pegado o cortado: no se inventa
+  if (!/^\d+[\dK]$/.test(limpio)) return;
+  if (!/[-.]/.test(crudo) && limpio[0] === '9') return;   // forma de celular
+  V.ventanaRut = 0;
+  proponerDato('rut', limpio.slice(0, -1) + '-' + limpio.slice(-1), texto);
 }
 
 /** Arma los campos una sola vez; despues se actualizan sin perder el foco. */
