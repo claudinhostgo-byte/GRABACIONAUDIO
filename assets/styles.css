@@ -654,7 +654,8 @@ body.embed.modo-vivo #vivo{height:calc(100vh - 62px)}
 }
 /* comentarios: bloque propio a todo el ancho (no la grilla etiqueta/campo
    de la clasificacion, que dejaba el texto en una columna de 96 px) */
-#coment{display:flex;flex-direction:column;gap:6px}
-#coment textarea{display:block;width:100%;box-sizing:border-box;min-width:0;min-height:110px;margin:0}
-#coment .clasif-acciones{justify-content:flex-start;align-items:center}
-#coment .dato-estado{margin:0}
+#coment,#notas{display:flex;flex-direction:column;gap:6px}
+#coment textarea,#notas textarea{display:block;width:100%;box-sizing:border-box;min-width:0;min-height:110px;margin:0}
+#notas textarea{min-height:80px}
+#coment .clasif-acciones,#notas .clasif-acciones{justify-content:flex-start;align-items:center}
+#coment .dato-estado,#notas .dato-estado{margin:0}

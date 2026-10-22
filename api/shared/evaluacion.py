@@ -262,8 +262,22 @@ INSTRUCCIONES_EXTRAER = (
     "Reglas estrictas:\n"
     "1. Cada dato que entregues DEBE traer en \"evidencia\" la cita textual literal "
     "de la transcripción de donde sale. Si no puedes citar, el valor es null.\n"
-    "2. Montos como número entero de pesos, sin puntos ni símbolos: \"un millón y "
-    "medio\" es 1500000, \"ochocientas cincuenta lucas\" es 850000.\n"
+    "2. Montos como número entero de pesos, sin puntos ni símbolos. En Chile casi "
+    "nunca se dicen cifras exactas, y el reconocimiento de voz además las deforma. "
+    "Interpreta según la magnitud PLAUSIBLE del dato: ingresos mensuales entre 300.000 y "
+    "10.000.000; montos de crédito y cuotas entre 10.000 y 100.000.000.\n"
+    "   - \"palo\" es millón (\"tres palos\" 3000000, \"un palo dos\" 1200000, \"medio palo\" "
+    "500000); \"luca\"/\"lucas\" es mil (\"ochocientas lucas\" 800000).\n"
+    "   - \"un millón dos\", \"uno dos\", \"uno coma dos\", \"uno punto dos (millones)\" son "
+    "1200000; \"un millón y medio\" 1500000; \"un millón ochocientos\" 1800000.\n"
+    "   - El reconocimiento escribe \"un millón dos\" como \"1000002\", \"uno dos\" como "
+    "\"1 dos\" o \"12\", y \"un millón y medio\" como \"1000000 y medio\": corrígelo según "
+    "la magnitud plausible. En Chile el punto separa miles, pero \"1.2 millones\" es 1200000.\n"
+    "   - Una cifra corta al hablar de sueldo o renta son miles (\"gano 600\", \"600 y algo\" "
+    "son 600000). \"Y algo\", \"más o menos\", \"como\": usa la cifra base.\n"
+    "   - Si la cifra NO estaba escrita tal cual en la transcripción, explica en "
+    "\"interpretacion\" cómo la leíste, en pocas palabras (p. ej. \"«1000002» = un millón "
+    "dos\"). Si estaba literal, interpretacion es null.\n"
     "3. RUT como cuerpo sin puntos, guion y dígito verificador: \"12345678-5\". "
     "La letra K va en mayúscula. No completes ni inventes dígitos que no se dijeron. "
     "El reconocimiento de voz casi nunca escribe bien la palabra RUT: suele aparecer "
@@ -292,7 +306,7 @@ INSTRUCCIONES_EXTRAER = (
     '"apellido_materno":{"valor":null,"evidencia":null},'
     '"telefono":{"valor":"987654321","evidencia":"cita"},'
     '"producto_ofrecido":{"valor":"Compra de cartera","evidencia":"cita"},'
-    '"monto_oferta":{"valor":5000000,"evidencia":"cita"},'
+    '"monto_oferta":{"valor":5000000,"evidencia":"cita","interpretacion":"«5 palos» = 5 millones"},'
     '"plazo_meses":{"valor":36,"evidencia":"cita"},'
     '"valor_cuota":{"valor":180000,"evidencia":"cita"},'
     '"tasa":{"valor":1.89,"evidencia":"cita"},'
@@ -436,6 +450,10 @@ def extraer(texto, campos=None, listas=None):
         item = {"valor": valor, "evidencia": evidencia}
         if campo == "rut":
             item["dvValido"] = rut_valido(valor)
+        if campo in CAMPOS_MONTO:
+            interp = str(crudo.get("interpretacion") or "").strip()[:160]
+            if interp:
+                item["interpretacion"] = interp
         salida[campo] = item
 
     # solo conteos: los valores son datos personales y no van al log
@@ -470,9 +488,18 @@ INSTRUCCIONES_CLASIFICAR = (
     "socio, se da a conocer la oferta...\"). Incluye el motivo, lo ofrecido y la respuesta "
     "del cliente. Solo hechos de la conversación; sin RUT, teléfonos ni montos de ingresos; "
     "sin opiniones sobre las personas.\n\n"
+    "Y redacta \"notas\": lo que el CLIENTE contó de sí mismo, ajeno al trámite, que le sirva "
+    "al ejecutivo para retomar el contacto con empatía (situación familiar, disponibilidad, "
+    "cómo prefiere que lo contacten, un evento próximo). Una o dos frases, en tercera persona, "
+    "solo hechos que el cliente dijo. Reglas:\n"
+    "   - NUNCA datos sensibles: salud o discapacidad, religión, opinión política o sindical, "
+    "vida u orientación sexual, origen étnico, situación judicial o deudas con terceros.\n"
+    "   - Sin nombres de terceros ni de menores de edad (\"sus hijos\", no sus nombres).\n"
+    "   - Sin juicios ni adjetivos sobre la persona.\n"
+    "   - Si no hay nada así en la conversación, notas es null. No lo inventes.\n\n"
     "Responde SOLO un objeto JSON con esta forma:\n"
     '{"opcion":3,"evidencia":"cita literal","justificacion":"una frase breve",'
-    '"comentarios":"Se conversa con ..."}'
+    '"comentarios":"Se conversa con ...","notas":"Vino con sus hijos ... o null"}'
 )
 
 
@@ -512,12 +539,16 @@ def clasificar(texto, opciones):
                      "justificacion": str(datos.get("justificacion") or "").strip() or None}
 
     comentarios = str(datos.get("comentarios") or "").strip()[:2000] or None
+    notas = str(datos.get("notas") or "").strip()[:1000] or None
+    if notas and notas.lower() in ("null", "ninguna", "n/a"):
+        notas = None
 
     logging.info("Clasificacion: %s", "con propuesta" if propuesta else "sin propuesta")
     return {
         "mock": False,
         "propuesta": propuesta,
         "comentarios": comentarios,
+        "notas": notas,
         "modelo": deployment,
         "tokens": uso.get("total_tokens"),
         "aviso": ("Propuesta automática a partir de la conversación. "

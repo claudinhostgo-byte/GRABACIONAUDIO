@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.21-10';
+const VERSION = '2026.10.22-1';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -741,9 +741,10 @@ function vivoReiniciar(){
   aplicarTasaPorDefecto();
   pintarSimulacion();
   V.clasif = clasifVacia();
-  V.coment = comentVacio();
+  V.textos = {};
+  Object.keys(TEXTOS).forEach((id) => { V.textos[id] = textoVacio(); });
   pintarSelectClasif();
-  pintarComent();
+  Object.keys(TEXTOS).forEach(pintarTexto);
   mostrarPestana('cliente');
   $('vivoCol').classList.remove('hidden');
   $('vivoAviso').classList.add('hidden');
@@ -985,7 +986,7 @@ async function revisarDatos(texto, gen){
   pendientes.forEach((c) => {
     const r = (d.datos || {})[c.clave];
     // si el modelo no lo encuentra en este tramo, se conserva lo anterior
-    if (r && r.valor != null && r.evidencia) proponerDato(c.id, r.valor, r.evidencia);
+    if (r && r.valor != null && r.evidencia) proponerDato(c.id, r.valor, r.evidencia, r.interpretacion);
   });
 }
 
@@ -1033,7 +1034,7 @@ function actualizarContadores(){
     const d = V.datos[c.id];
     if (d && (d.estado === 'detectado' || d.estado === 'editado')) cuenta[c.pestana]++;
   });
-  [V.clasif, V.coment].forEach((k) => {
+  [V.clasif].concat(Object.values(V.textos || {})).forEach((k) => {
     if (k && (k.estado === 'propuesto' || k.estado === 'editado')) cuenta.cierre++;
   });
   document.querySelectorAll('.pestana').forEach((b) => {
@@ -1135,7 +1136,7 @@ function leerDato(c, texto){
 }
 
 /** Propuesta que llega de la conversacion. No pisa lo corregido ni lo confirmado. */
-function proponerDato(id, valor, evidencia){
+function proponerDato(id, valor, evidencia, interpretacion){
   const d = V.datos[id];
   if (!d || (d.estado !== 'vacio' && d.estado !== 'detectado')) return;
   // con monto, plazo y tasa la cuota se calcula: lo dicho no la reemplaza
@@ -1144,7 +1145,8 @@ function proponerDato(id, valor, evidencia){
   const numerico = c.tipo === 'monto' || c.tipo === 'entero' || c.tipo === 'porcentaje';
   const nuevo = numerico ? Number(valor) : formatoDato(c.tipo, valor);
   if (d.estado === 'detectado' && String(d.valor) === String(nuevo)) return;
-  V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado' });
+  V.datos[id] = Object.assign(datoVacio(), { valor: nuevo, evidencia, estado: 'detectado',
+                                            interpretacion: interpretacion || null });
   pintarDato(c, true);
 }
 
@@ -1451,6 +1453,9 @@ function pintarDato(c, recien, soloEstado){
   else if (d.estado === 'detectado' && c.tipo === 'rut' && !rutValido(d.valor)){
     texto = 'El dígito verificador no corresponde.'; clase = 'bad';
   }
+  else if (d.interpretacion && d.estado === 'detectado'){
+    texto = 'Interpretado: ' + d.interpretacion + '. Revise antes de confirmar.';
+  }
   else if (d.origen === 'opcion' && d.estado === 'detectado'){
     texto = 'Igual a lo solicitado: elija otra opción arriba si corresponde.';
   }
@@ -1649,22 +1654,34 @@ function pintarClasif(){
 
 const clasifVacia = () => ({ estado: 'vacio', clasificacion: '', motivo: '', submotivo: '',
                              evidencia: null, traspaso: null, error: '', pidiendo: false });
-const comentVacio = () => ({ estado: 'vacio', texto: '', traspaso: null, error: '' });
+/* Bloques de texto libre del cierre. Los redacta el modelo al clasificar y
+   la persona los revisa y confirma con OK, como el resto. `vacio` explica por
+   que puede quedar en blanco (las notas solo existen si el cliente conto algo
+   util para el seguimiento). */
+const TEXTOS = {
+  coment: { campo: 'comentarios', clave: 'comentarios',
+            falta: 'Escriba los comentarios de la gestión.' },
+  notas:  { campo: 'notas', clave: 'notas',
+            falta: 'Escriba la nota o deje el campo vacío y no la confirme.',
+            vacio: 'El cliente no compartió nada personal relevante para el seguimiento.' }
+};
+const textoVacio = () => ({ estado: 'vacio', texto: '', traspaso: null, error: '', sinContenido: false });
 
-function pintarComent(){
-  const k = V.coment;
+function pintarTexto(id){
+  const k = V.textos && V.textos[id];
   if (!k) return;
   const confirmado = k.estado === 'confirmado';
-  const ta = $('comentTxt');
+  const ta = $(id + 'Txt');
   if (document.activeElement !== ta) ta.value = k.texto || '';
   ta.readOnly = confirmado;
-  $('comentOk').textContent = confirmado ? 'Editar' : 'OK';
-  $('comentOk').className = confirmado ? 'ghost small' : 'primary small';
-  $('coment').className = 'clasif coment' + (k.estado === 'propuesto' ? ' detectado' : '') +
-                          (confirmado ? ' confirmado' : '');
+  $(id + 'Ok').textContent = confirmado ? 'Editar' : 'OK';
+  $(id + 'Ok').className = confirmado ? 'ghost small' : 'primary small';
+  $(id).className = 'clasif coment' + (k.estado === 'propuesto' ? ' detectado' : '') +
+                    (confirmado ? ' confirmado' : '');
   let texto = '', clase = '';
   if (k.error && !confirmado){ texto = k.error; clase = 'bad'; }
   else if (k.estado === 'propuesto') texto = 'Redactado automáticamente: revise y confirme con OK.';
+  else if (k.estado === 'vacio' && k.sinContenido) texto = TEXTOS[id].vacio || '';
   else if (confirmado){
     texto = { enviando: 'Traspasando al caso…', ok: '✓ En el caso',
               error: 'No llegó al caso: ' + (k.error || 'sin respuesta') + '. Use Editar y OK para reintentar.',
@@ -1672,27 +1689,40 @@ function pintarComent(){
             }[k.traspaso] || 'Confirmado.';
     clase = k.traspaso === 'ok' ? 'ok' : k.traspaso === 'error' ? 'bad' : '';
   }
-  $('comentEstado').textContent = texto;
-  $('comentEstado').className = 'dato-estado' + (clase ? ' ' + clase : '');
+  $(id + 'Estado').textContent = texto;
+  $(id + 'Estado').className = 'dato-estado' + (clase ? ' ' + clase : '');
   actualizarContadores();
 }
 
-async function confirmarComent(){
-  const k = V.coment;
+async function confirmarTexto(id){
+  const k = V.textos[id];
   if (k.estado === 'confirmado'){
     k.estado = 'editado'; k.traspaso = null; k.error = '';
-    pintarComent();
+    pintarTexto(id);
     return;
   }
-  const texto = $('comentTxt').value.trim();
-  if (!texto){ k.error = 'Escriba los comentarios de la gestión.'; pintarComent(); return; }
+  const texto = $(id + 'Txt').value.trim();
+  if (!texto){ k.error = TEXTOS[id].falta; pintarTexto(id); return; }
   k.texto = texto; k.estado = 'confirmado'; k.traspaso = 'enviando'; k.error = '';
-  pintarComent();
-  const r = await enviarACaso('comentarios', texto);
-  if (V.coment !== k || k.estado !== 'confirmado' || k.texto !== texto) return;
+  pintarTexto(id);
+  const r = await enviarACaso(TEXTOS[id].campo, texto);
+  if (V.textos[id] !== k || k.estado !== 'confirmado' || k.texto !== texto) return;
   k.traspaso = r.sinDynamics ? 'sin-dynamics' : r.ok ? 'ok' : 'error';
   k.error = r.ok || r.sinDynamics ? '' : (r.error || 'error desconocido');
-  pintarComent();
+  pintarTexto(id);
+}
+
+/** Propuesta del modelo: solo si nadie lo escribio ni confirmo. */
+function proponerTexto(id, valor, simulado){
+  const k = V.textos[id];
+  if (!k || (k.estado !== 'vacio' && k.estado !== 'propuesto')) return;
+  if (valor){
+    Object.assign(k, { texto: valor + (simulado ? ' (simulado)' : ''), estado: 'propuesto',
+                       error: '', sinContenido: false });
+  } else {
+    Object.assign(k, { texto: '', estado: 'vacio', sinContenido: true });
+  }
+  pintarTexto(id);
 }
 
 /** Pide la propuesta con TODA la conversacion: el motivo suele decirse al principio. */
@@ -1700,8 +1730,8 @@ async function vivoClasificar(){
   const k = V.clasif;
   if (!k || k.pidiendo) return;
   const quiereClasif = k.estado !== 'confirmado' && k.estado !== 'editado';
-  const quiereComent = V.coment && (V.coment.estado === 'vacio' || V.coment.estado === 'propuesto');
-  if (!quiereClasif && !quiereComent) return;
+  const quiereTexto = Object.values(V.textos || {}).some((t) => t.estado === 'vacio' || t.estado === 'propuesto');
+  if (!quiereClasif && !quiereTexto) return;
   const texto = V.frases.map((f) => f.texto).join(' ');
   if (!texto.trim()){ k.error = 'Todavía no hay conversación que clasificar.'; pintarClasif(); return; }
   if (!S.cfg.clasificarUrl){ k.error = 'Falta el endpoint de clasificación.'; pintarClasif(); return; }
@@ -1712,11 +1742,7 @@ async function vivoClasificar(){
     const d = await postJson(S.cfg.clasificarUrl, { texto, recordId: S.id, opciones: opcionesCatalogo() });
     if (gen !== V.gen || V.clasif !== k) return;
     k.pidiendo = false;
-    const c = V.coment;
-    if (d.comentarios && c && (c.estado === 'vacio' || c.estado === 'propuesto')){
-      Object.assign(c, { texto: d.comentarios + (d.mock ? ' (simulado)' : ''), estado: 'propuesto', error: '' });
-      pintarComent();
-    }
+    Object.keys(TEXTOS).forEach((id) => proponerTexto(id, d[TEXTOS[id].clave], d.mock));
     // si la persona eligio a mano mientras tanto, manda lo suyo
     if (k.estado === 'editado' || k.estado === 'confirmado'){ pintarClasif(); return; }
     if (!d.propuesta){
@@ -3376,12 +3402,14 @@ function init(){
     $('clasifS').onchange = () => alCambiarClasif('S');
     $('clasifProponer').onclick = vivoClasificar;
     $('clasifOk').onclick = confirmarClasif;
-    $('comentOk').onclick = confirmarComent;
-    $('comentTxt').addEventListener('input', () => {
-      const k = V.coment;
-      if (!k || k.estado === 'confirmado') return;
-      k.texto = $('comentTxt').value; k.estado = 'editado'; k.error = '';
-      pintarComent();
+    Object.keys(TEXTOS).forEach((id) => {
+      $(id + 'Ok').onclick = () => confirmarTexto(id);
+      $(id + 'Txt').addEventListener('input', () => {
+        const k = V.textos[id];
+        if (!k || k.estado === 'confirmado') return;
+        k.texto = $(id + 'Txt').value; k.estado = 'editado'; k.error = ''; k.sinContenido = false;
+        pintarTexto(id);
+      });
     });
     document.querySelectorAll('.pestana').forEach((b) => { b.onclick = () => mostrarPestana(b.dataset.p); });
     document.body.classList.add('modo-vivo');

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Grabador de audio — Azure Blob</title>
-<link rel="stylesheet" href="assets/styles.css?v=2026.10.21-10" />
+<link rel="stylesheet" href="assets/styles.css?v=2026.10.22-1" />
 </head>
 <body>
 <div class="shell">
@@ -293,6 +293,16 @@
             </div>
             <div id="comentEstado" class="dato-estado"></div>
           </div>
+
+          <h3 class="trh">Notas para el seguimiento</h3>
+          <div id="notas" class="clasif coment">
+            <textarea id="notasTxt" rows="3" spellcheck="true"
+              placeholder="Lo que el cliente contó de sí que sirva para retomar el contacto: familia, disponibilidad, preferencias."></textarea>
+            <div class="clasif-acciones">
+              <button id="notasOk" class="primary small" type="button">OK</button>
+            </div>
+            <div id="notasEstado" class="dato-estado"></div>
+          </div>
           </div>
           <p class="conv-nota">Indicio automático sobre el contenido de la conversación.
             No evalúa a la persona ni reemplaza una revisión humana.</p>
@@ -416,6 +426,6 @@
     Prototipo de prueba — W-IT. El audio se sube al contenedor configurado; la transcripción es la etapa 2 (ver README).
   </footer>
 </div>
-<script src="assets/app.js?v=2026.10.21-10"></script>
+<script src="assets/app.js?v=2026.10.22-1"></script>
 </body>
 </html>

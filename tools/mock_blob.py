@@ -230,8 +230,10 @@ class Handler(BaseHTTPRequestHandler):
         print("  POST /clasificar  %s" % ("con propuesta" if propuesta else "sin propuesta"), flush=True)
         comentarios = ("[Simulado] Se conversa con el socio, se da a conocer la oferta de campaña "
                        "y se registra su respuesta.")
+        notas = ("[Simulado] Vino con sus hijos; prefiere que lo llamen en la tarde."
+                 if "hijos" in texto else None)
         return self._responder({"mock": True, "propuesta": propuesta, "comentarios": comentarios,
-                                "modelo": "simulador"})
+                                "notas": notas, "modelo": "simulador"})
 
     def _responder(self, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()

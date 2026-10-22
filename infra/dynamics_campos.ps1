@@ -133,7 +133,8 @@ $campos = @(
     (CampoDecimal "TasaMensual"      "Tasa mensual (%)"   "Tasa de interés mensual ofrecida, $origen"),
     (CampoDecimal "Cae"              "CAE (%)"            "Carga anual equivalente de la oferta, $origen"),
     (CampoLista  "RespuestaCliente"  "Respuesta del cliente" "Respuesta del cliente a la oferta, $origen$demo" $respuestas),
-    (CampoMemo   "ComentariosGestion" "Comentarios de la gestión" "Registro de la gestión redactado a partir de la conversación y confirmado por el ejecutivo." 4000)
+    (CampoMemo   "ComentariosGestion" "Comentarios de la gestión" "Registro de la gestión redactado a partir de la conversación y confirmado por el ejecutivo." 4000),
+    (CampoMemo   "NotasSeguimiento" "Notas para el seguimiento" "Contexto personal que el cliente compartió y sirve para retomar el contacto (sin datos sensibles); confirmado por el ejecutivo." 2000)
 )
 
 $base = "$api/EntityDefinitions(LogicalName='incident')/Attributes"

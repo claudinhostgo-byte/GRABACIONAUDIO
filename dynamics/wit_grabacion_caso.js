@@ -50,7 +50,7 @@ WIT.Grabacion = (function () {
     // Version del recurso web. Se sube en cada cambio y viaja en la URL del
     // iframe: ademas de hacerla visible, evita que Dynamics sirva una copia
     // cacheada de la pagina.
-    var VERSION      = "2026.10.21-10";
+    var VERSION      = "2026.10.22-1";
 
     var BASE_URL     = "https://proud-smoke-0ef172d03.5.azurestaticapps.net";
     // Pestana completa: todos los pasos, clip de evidencia y configuracion.
@@ -105,6 +105,7 @@ WIT.Grabacion = (function () {
         cae:           "wit_cae",
         respuesta:     "wit_respuestacliente",
         comentarios:   "wit_comentariosgestion",
+        notas:         "wit_notasseguimiento",
         // listas de opciones: llega el texto y se busca la opcion por su etiqueta
         clasificacion: "wit_clasificacion",
         motivo:        "wit_motivo",

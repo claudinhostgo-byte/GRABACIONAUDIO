@@ -276,7 +276,9 @@ FRASES_BASE = [
     "guion", "guion K", "dígito verificador",
     "Coopeuch", "socio", "socia", "compra de cartera", "crédito de consumo",
     "crédito preaprobado", "CAE", "carga anual equivalente", "tasa mensual",
-    "valor cuota", "renta líquida",
+    "valor cuota", "renta líquida", "sueldo líquido",
+    # como se habla de plata en Chile
+    "lucas", "palos", "un palo", "medio palo", "un millón y medio",
 ]
 
 
