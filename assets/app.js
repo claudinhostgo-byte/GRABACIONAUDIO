@@ -5,7 +5,7 @@
 
 /* Version visible en pantalla. Se sube en cada cambio de la pagina, para
    poder confirmar de un vistazo si el navegador esta sirviendo lo ultimo. */
-const VERSION = '2026.10.22-1';
+const VERSION = '2026.10.22-2';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY  = 'wit.audiorec.cfg.v2';
@@ -673,9 +673,15 @@ const TEMAS_VIVO = [
               'monto, cuota, plazo, tasa o condiciones? Que alguien solo nombre la palabra ' +
               '"crédito" o pregunte por uno NO basta: tiene que haber una oferta o una negociación.',
     claves: [], soloSi: true, guia: 'preaprobado' },
+  /* Beneficios: igual que el credito, sin palabra clave ni "parcial". Solo
+     cuenta que el ejecutivo nombre explicitamente un beneficio concreto. */
   { titulo: 'Beneficios',
-    criterio: '¿Se mencionaron beneficios o ventajas para el cliente en la conversación?',
-    claves: ['beneficio', 'ventaja'] }
+    criterio: '¿El ejecutivo le informó EXPLÍCITAMENTE al cliente qué beneficios concretos tiene ' +
+              'por ser socio, nombrando al menos uno (por ejemplo un descuento, un convenio, un ' +
+              'seguro o un programa como salud o educación)? NO cuentan: que el cliente pregunte ' +
+              'por beneficios, las condiciones de un crédito (cuotas, plazos, tasas, montos), ' +
+              'frases genéricas sin nombrar ningún beneficio, ni deducciones o suposiciones.',
+    claves: [], soloSi: true }
 ];
 
 const sinTildes = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
